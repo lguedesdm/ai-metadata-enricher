@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ai-metadata-enricher.gov/synergy-export.v1.schema.json",
+  "title": "Synergy Export Schema",
+  "description": "JSON Schema for metadata exported from the Synergy system. This schema defines the external data contract for Synergy metadata ingestion into the AI Metadata Enrichment platform. Designed for RAG-first indexing, deterministic hashing, and incremental updates.",
+  "type": "object",
+  "required": [
+    "id",
+    "sourceSystem",
+    "entityType",
+    "entityName",
+    "entityPath",
+    "content",
+    "lastUpdated",
+    "schemaVersion"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Globally unique, stable identifier for this metadata entity. Must remain constant across exports for the same entity. Used for deterministic hashing and incremental indexing.",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[a-zA-Z0-9._-]+$",
+      "examples": [
+        "synergy.student.enrollment.table",
+        "synergy.demographics.ethnicity.column"
+      ]
+    },
+    "sourceSystem": {
+      "type": "string",
+      "description": "Source system identifier. Must be 'synergy' for this schema.",
+      "const": "synergy"
+    },
+    "entityType": {
+      "type": "string",
+      "description": "Type of metadata entity being described.",
+      "enum": [
+        "table",
+        "column",
+        "dataset",
+        "element"
+      ]
+    },
+    "entityName": {
+      "type": "string",
+      "description": "Human-readable name of the metadata entity.",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "entityPath": {
+      "type": "string",
+      "description": "Hierarchical path to the entity within the source system. Used for navigation and lineage tracking.",
+      "minLength": 1,
+      "maxLength": 1000,
+      "examples": [
+        "database.schema.table",
+        "module.section.field"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "description": "Technical description of the metadata entity from the source system.",
+      "minLength": 1,
+      "maxLength": 5000
+    },
+    "businessMeaning": {
+      "type": "string",
+      "description": "Business-oriented explanation of what this entity represents and how it is used. Essential for semantic search and RAG context.",
+      "minLength": 1,
+      "maxLength": 5000
+    },
+    "domain": {
+      "type": "string",
+      "description": "Business domain or subject area to which this entity belongs.",
+      "minLength": 1,
+      "maxLength": 255,
+      "examples": [
+        "Student Information",
+        "Human Resources",
+        "Finance",
+        "Attendance"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "description": "Searchable tags for categorization and filtering. Used for faceted search and metadata discovery.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "minItems": 0,
+      "maxItems": 50,
+      "uniqueItems": true
+    },
+    "content": {
+      "type": "string",
+      "description": "Consolidated textual representation suitable for semantic indexing and RAG embedding. Should include key searchable information from description, businessMeaning, and other relevant fields.",
+      "minLength": 1,
+      "maxLength": 10000
+    },
+    "lastUpdated": {
+      "type": "string",
+      "description": "Timestamp of the last update to this metadata entity in the source system. ISO 8601 format with timezone.",
+      "format": "date-time",
+      "examples": [
+        "2026-01-12T14:30:00Z",
+        "2026-01-12T09:30:00-05:00"
+      ]
+    },
+    "schemaVersion": {
+      "type": "string",
+      "description": "Semantic version of this schema. Used for contract versioning and compatibility validation.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "examples": [
+        "1.0.0"
+      ]
+    },
+    "dataType": {
+      "type": "string",
+      "description": "Data type of the entity, if applicable (e.g., for columns or elements).",
+      "maxLength": 100,
+      "examples": [
+        "VARCHAR(255)",
+        "INTEGER",
+        "DATE",
+        "BOOLEAN"
+      ]
+    },
+    "sourceTable": {
+      "type": "string",
+      "description": "Source table name if this entity is a column or derived from a specific table.",
+      "maxLength": 255
+    },
+    "cedsReference": {
+      "type": "string",
+      "description": "Reference to Common Education Data Standards (CEDS) element, if applicable. May be a CEDS ID or URI.",
+      "maxLength": 500,
+      "examples": [
+        "CEDS-00001",
+        "https://ceds.ed.gov/element/001234"
+      ]
+    },
+    "lineage": {
+      "type": "array",
+      "description": "Ordered list of upstream entity identifiers representing data lineage. First element is the most direct parent.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255
+      },
+      "minItems": 0,
+      "maxItems": 100,
+      "uniqueItems": false
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "synergy.student.enrollment.table",
+      "sourceSystem": "synergy",
+      "entityType": "table",
+      "entityName": "Student Enrollment",
+      "entityPath": "synergy.student.enrollment",
+      "description": "Stores student enrollment records including enrollment dates and status.",
+      "businessMeaning": "This table contains the core enrollment information for all students, tracking when they enrolled, their current status, and enrollment type. Used by attendance, scheduling, and reporting systems.",
+      "domain": "Student Information",
+      "tags": [
+        "enrollment",
+        "student",
+        "registration",
+        "core"
+      ],
+      "content": "Student Enrollment table in Synergy Student Information System. Stores student enrollment records including enrollment dates and status. This table contains the core enrollment information for all students, tracking when they enrolled, their current status, and enrollment type. Used by attendance, scheduling, and reporting systems. Domain: Student Information.",
+      "lastUpdated": "2026-01-12T10:00:00Z",
+      "schemaVersion": "1.0.0",
+      "sourceTable": "STU_ENROLLMENT"
+    }
+  ]
+}

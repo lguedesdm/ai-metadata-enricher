@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "description": "Blob path to processing configuration lookup table. Maps blob storage prefixes to source systems, validation schemas, and processing flags. Used for deterministic event routing and validation.",
+  "lastUpdated": "2026-01-12T00:00:00Z",
+  "blobMappings": [
+    {
+      "pathPrefix": "raw/synergy/",
+      "description": "Raw metadata exports from Synergy Student Information System. Files in this path contain JSON exports conforming to the synergy-export schema.",
+      "sourceSystem": "synergy",
+      "schema": "contracts/schemas/synergy-export.schema.json",
+      "indexInSearch": true,
+      "triggerEnrichment": true,
+      "retentionDays": 90,
+      "notes": "Primary source for student information metadata. Validated against synergy-export.schema.json on ingestion."
+    },
+    {
+      "pathPrefix": "raw/zipline/",
+      "description": "Raw metadata exports from Zipline Assessment Management System. Files in this path contain JSON exports conforming to the zipline-export schema.",
+      "sourceSystem": "zipline",
+      "schema": "contracts/schemas/zipline-export.schema.json",
+      "indexInSearch": true,
+      "triggerEnrichment": true,
+      "retentionDays": 90,
+      "notes": "Primary source for assessment metadata. Validated against zipline-export.schema.json on ingestion."
+    },
+    {
+      "pathPrefix": "raw/documentation/",
+      "description": "Unstructured documentation files (PDF, Word, Markdown) related to data dictionaries, business glossaries, and system documentation.",
+      "sourceSystem": "documentation",
+      "schema": null,
+      "indexInSearch": true,
+      "triggerEnrichment": false,
+      "retentionDays": 365,
+      "notes": "Indexed for RAG retrieval but not enriched. No schema validation required for unstructured content."
+    },
+    {
+      "pathPrefix": "enriched/synergy/",
+      "description": "AI-enriched metadata outputs from Synergy data after processing through enrichment pipeline.",
+      "sourceSystem": "synergy",
+      "schema": null,
+      "indexInSearch": true,
+      "triggerEnrichment": false,
+      "retentionDays": 180,
+      "notes": "Output of enrichment pipeline. Already processed, indexed for search but not re-enriched."
+    },
+    {
+      "pathPrefix": "enriched/zipline/",
+      "description": "AI-enriched metadata outputs from Zipline data after processing through enrichment pipeline.",
+      "sourceSystem": "zipline",
+      "schema": null,
+      "indexInSearch": true,
+      "triggerEnrichment": false,
+      "retentionDays": 180,
+      "notes": "Output of enrichment pipeline. Already processed, indexed for search but not re-enriched."
+    },
+    {
+      "pathPrefix": "archive/",
+      "description": "Archived files moved from raw/ or enriched/ paths after retention period expires. Long-term cold storage.",
+      "sourceSystem": "archive",
+      "schema": null,
+      "indexInSearch": false,
+      "triggerEnrichment": false,
+      "retentionDays": 2555,
+      "notes": "Cold storage tier. Not indexed or processed. Retained for compliance (7 years)."
+    },
+    {
+      "pathPrefix": "quarantine/",
+      "description": "Files that failed schema validation or enrichment processing. Requires manual review and remediation.",
+      "sourceSystem": "quarantine",
+      "schema": null,
+      "indexInSearch": false,
+      "triggerEnrichment": false,
+      "retentionDays": 30,
+      "notes": "Failed validation or processing. Manual intervention required. Purged after 30 days if not resolved."
+    }
+  ],
+  "lookupRules": {
+    "matchingStrategy": "longestPrefixMatch",
+    "caseSensitive": false,
+    "pathNormalization": "forwardSlashes",
+    "description": "Blob path matching uses longest prefix match. Paths are normalized to forward slashes. Matching is case-insensitive for Azure Blob Storage compatibility."
+  },
+  "governance": {
+    "owner": "Platform Architecture Team",
+    "approvers": [
+      "Architecture Team Lead",
+      "Security Team Lead"
+    ],
+    "changeProcess": "All changes to this lookup table require ADR and follow the same governance process as JSON Schemas. Breaking changes require new version.",
+    "freezeStatus": "pre-production",
+    "nextReview": "2026-02-12"
+  }
+}
