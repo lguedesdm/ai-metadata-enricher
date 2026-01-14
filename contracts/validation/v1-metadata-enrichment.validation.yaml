@@ -1,0 +1,856 @@
+version: "1.0.0"
+status: frozen
+frozen_date: "2026-01-14"
+mvp_profile: "Minimal Safe MVP Rule Set"
+description: >
+  Frozen validation rules for AI-generated metadata suggestions (MVP).
+  This is a MINIMAL SAFE rule set designed for MVP deployment, focusing on
+  critical safety, grounding, and auditability requirements while reducing
+  operational complexity. Stricter rules may be introduced post-production.
+  
+  GOVERNANCE: Any modification requires a new version, ADR, and approval from
+  Architecture and Security teams.
+
+change_control:
+  requires_new_version: true
+  requires_adr: true
+  approval_required:
+    - architecture_team
+    - security_team
+
+mvp_rationale: >
+  This MVP rule set focuses on ESSENTIAL safety guarantees:
+  - RAG-first grounding (no external knowledge)
+  - Human-in-the-loop (suggestions only)
+  - Deterministic structured output
+  - Auditability (source citations required)
+  
+  Advanced heuristics (fine-grained hallucination patterns, context alignment logic)
+  are relaxed or made advisory to reduce false rejection rates during initial deployment.
+  Post-MVP, additional blocking rules may be introduced based on production data.
+
+# ==============================================================================
+# MVP VALIDATION RULE SET (BLOCKING)
+# ==============================================================================
+# These rules MUST pass for a response to be ACCEPTED.
+# First failure causes immediate rejection.
+# ==============================================================================
+
+blocking_rules:
+
+  # ============================================================================
+  # CATEGORY 1: STRUCTURAL VALIDATION (BLOCKING)
+  # ============================================================================
+
+  - rule_id: V001
+    category: structural
+    name: "YAML Parseability"
+    description: "Response must be valid, parseable YAML."
+    check:
+      type: yaml_parse
+      action: parse_yaml
+    pass_condition: "YAML parsing succeeds without errors."
+    fail_condition: "YAML parsing fails or raises exception."
+    failure_action: reject
+    failure_message: "Response is not valid YAML. Parsing failed."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - unparseable responses cannot be processed."
+
+  - rule_id: V002
+    category: structural
+    name: "No Extraneous Text"
+    description: "Response must contain ONLY YAML. No preamble, commentary, or explanation."
+    check:
+      type: text_analysis
+      action: detect_non_yaml_content
+      patterns:
+        - "```yaml"
+        - "```"
+        - "(?i)^(Here|I suggest|My suggestion|Based on)"
+    pass_condition: "No non-YAML text detected."
+    fail_condition: "Commentary, preamble, or explanation text detected."
+    failure_action: reject
+    failure_message: "Response contains text outside YAML structure."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - maintains deterministic structured output."
+
+  # ============================================================================
+  # CATEGORY 2: REQUIRED FIELDS (BLOCKING)
+  # ============================================================================
+
+  - rule_id: V010
+    category: required_fields
+    name: "Suggested Description Present"
+    description: "Field 'suggested_description' must exist and be non-empty string."
+    check:
+      type: field_presence
+      field: suggested_description
+      must_be_non_empty: true
+      must_be_string: true
+    pass_condition: "Field exists, is a string, and is not empty."
+    fail_condition: "Field is missing, empty, or not a string."
+    failure_action: reject
+    failure_message: "Required field 'suggested_description' is missing or empty."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - core output of the AI system."
+
+  - rule_id: V011
+    category: required_fields
+    name: "Confidence Present"
+    description: "Field 'confidence' must exist and be non-empty string."
+    check:
+      type: field_presence
+      field: confidence
+      must_be_non_empty: true
+      must_be_string: true
+    pass_condition: "Field exists, is a string, and is not empty."
+    fail_condition: "Field is missing, empty, or not a string."
+    failure_action: reject
+    failure_message: "Required field 'confidence' is missing or empty."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - indicates AI certainty for human review prioritization."
+
+  - rule_id: V012
+    category: required_fields
+    name: "Used Sources Present"
+    description: "Field 'used_sources' must exist and be a non-empty array."
+    check:
+      type: field_presence
+      field: used_sources
+      must_be_array: true
+      min_items: 1
+    pass_condition: "Field exists, is an array, and contains at least 1 item."
+    fail_condition: "Field is missing, not an array, or empty."
+    failure_action: reject
+    failure_message: "Required field 'used_sources' is missing, not an array, or empty."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - enforces RAG grounding, enables auditability."
+
+  # ============================================================================
+  # CATEGORY 3: BASIC CONSTRAINTS (BLOCKING)
+  # ============================================================================
+
+  - rule_id: V020
+    category: field_constraints
+    name: "Suggested Description Length"
+    description: "Suggested description must be between 10 and 500 characters."
+    check:
+      type: length_constraint
+      field: suggested_description
+      min_length: 10
+      max_length: 500
+    pass_condition: "Length is >= 10 and <= 500 characters."
+    fail_condition: "Length is < 10 or > 500 characters."
+    failure_action: reject
+    failure_message: "Suggested description length violates constraints (min: 10, max: 500)."
+    severity: high
+    enforcement: blocking
+    mvp_justification: "Essential - prevents empty responses and excessive verbosity."
+
+  - rule_id: V021
+    category: field_constraints
+    name: "Confidence Allowed Values"
+    description: "Confidence must be exactly 'low', 'medium', or 'high'."
+    check:
+      type: enum_validation
+      field: confidence
+      allowed_values:
+        - low
+        - medium
+        - high
+      case_sensitive: true
+    pass_condition: "Value is one of the allowed values."
+    fail_condition: "Value is not in the allowed set."
+    failure_action: reject
+    failure_message: "Confidence value is invalid. Must be 'low', 'medium', or 'high'."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - maintains deterministic output, enables automated processing."
+
+  # ============================================================================
+  # CATEGORY 4: GROUNDING ENFORCEMENT (BLOCKING)
+  # ============================================================================
+
+  - rule_id: V030
+    category: grounding
+    name: "No Explicit External Knowledge"
+    description: "Response must not explicitly reference external knowledge or training data."
+    check:
+      type: pattern_detection
+      field: suggested_description
+      forbidden_patterns:
+        - "(?i)based on (my |general )?knowledge"
+        - "(?i)(my |general |common )knowledge"
+        - "(?i)training data"
+        - "(?i)as far as I know"
+      case_insensitive: true
+    pass_condition: "No forbidden patterns detected."
+    fail_condition: "At least one forbidden pattern detected."
+    failure_action: reject
+    failure_message: "Response explicitly references external knowledge instead of RAG context."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - enforces RAG-first architecture."
+
+  - rule_id: V031
+    category: grounding
+    name: "No Placeholder Responses"
+    description: "Suggested description must not be a placeholder or non-descriptive value."
+    check:
+      type: pattern_detection
+      field: suggested_description
+      forbidden_patterns:
+        - "^N/A$"
+        - "^n/a$"
+        - "^None$"
+        - "^none$"
+        - "^Unknown$"
+        - "^unknown$"
+        - "^TBD$"
+        - "^TODO$"
+      case_insensitive: false
+    pass_condition: "No placeholder patterns detected."
+    fail_condition: "Placeholder pattern detected."
+    failure_action: reject
+    failure_message: "Suggested description is a placeholder or non-descriptive value."
+    severity: high
+    enforcement: blocking
+    mvp_justification: "Essential - ensures AI provides substantive suggestions."
+
+  - rule_id: V032
+    category: grounding
+    name: "Source Attribution Not Vague"
+    description: "Used sources must not reference vague or external sources."
+    check:
+      type: pattern_detection
+      field: used_sources
+      apply_to_array_items: true
+      forbidden_patterns:
+        - "(?i)general knowledge"
+        - "(?i)training data"
+        - "(?i)common knowledge"
+        - "(?i)internet"
+        - "(?i)web search"
+      case_insensitive: true
+    pass_condition: "No forbidden patterns detected in any source."
+    fail_condition: "At least one source contains forbidden pattern."
+    failure_action: reject
+    failure_message: "Used sources reference vague attribution instead of RAG context."
+    severity: critical
+    enforcement: blocking
+    mvp_justification: "Essential - enforces RAG grounding, prevents hallucination."
+
+  # ============================================================================
+  # CATEGORY 5: CONTEXT INSUFFICIENCY HANDLING (BLOCKING)
+  # ============================================================================
+
+  - rule_id: V040
+    category: context_handling
+    name: "Insufficient Context Confidence"
+    description: "If warnings indicate insufficient context, confidence must be 'low'."
+    check:
+      type: conditional_logic
+      condition:
+        warnings_contain_pattern: "(?i)(insufficient|partial|incomplete|limited) context"
+      then_require:
+        field: confidence
+        must_equal: low
+    pass_condition: "If insufficient context warning exists, confidence is 'low'."
+    fail_condition: "Insufficient context warning exists but confidence is not 'low'."
+    failure_action: reject
+    failure_message: "Confidence must be 'low' when insufficient context is flagged."
+    severity: high
+    enforcement: blocking
+    mvp_justification: "Essential - ensures AI admits uncertainty when context is weak."
+
+# ==============================================================================
+# ADVISORY RULES (NON-BLOCKING)
+# ==============================================================================
+# These rules generate warnings/flags but do NOT cause rejection.
+# Used for monitoring, quality insights, and human review prioritization.
+# ==============================================================================
+
+advisory_rules:
+
+  - rule_id: A001
+    category: quality_monitoring
+    name: "Low Confidence Flag"
+    description: "Flag responses with 'low' confidence for priority human review."
+    check:
+      type: flag_for_review
+      condition:
+        field: confidence
+        equals: low
+    action: flag
+    flag_message: "Low confidence response - prioritize for human review."
+    severity: info
+    enforcement: advisory
+    mvp_justification: "Non-blocking - helps prioritize review queue, does not block valid responses."
+
+  - rule_id: A002
+    category: quality_monitoring
+    name: "Short Description Flag"
+    description: "Flag descriptions under 30 characters as potentially lacking detail."
+    check:
+      type: flag_for_review
+      condition:
+        field: suggested_description
+        length_less_than: 30
+    action: flag
+    flag_message: "Short description - may lack detail."
+    severity: info
+    enforcement: advisory
+    mvp_justification: "Non-blocking - short descriptions may be valid for simple assets."
+
+  - rule_id: A003
+    category: quality_monitoring
+    name: "Warnings Present Flag"
+    description: "Flag responses with warnings for closer human review."
+    check:
+      type: flag_for_review
+      condition:
+        field: warnings
+        is_present: true
+        is_non_empty: true
+    action: flag
+    flag_message: "Response contains warnings - review carefully."
+    severity: info
+    enforcement: advisory
+    mvp_justification: "Non-blocking - warnings are informative, not necessarily indicative of failure."
+
+  - rule_id: A004
+    category: quality_monitoring
+    name: "Multiple Sources Flag"
+    description: "Flag responses with only 1 source as potentially under-researched."
+    check:
+      type: flag_for_review
+      condition:
+        field: used_sources
+        array_size_equals: 1
+    action: flag
+    flag_message: "Single source used - consider if additional context was available."
+    severity: info
+    enforcement: advisory
+    mvp_justification: "Non-blocking - single source may be appropriate for simple assets."
+
+  - rule_id: A005
+    category: quality_monitoring
+    name: "Uncertainty Language Flag"
+    description: "Flag responses with hedging language (informational, not blocking)."
+    check:
+      type: pattern_detection
+      field: suggested_description
+      patterns:
+        - "(?i)(appears to be|seems to be|likely|possibly|potentially)"
+      case_insensitive: true
+    action: flag
+    flag_message: "Uncertainty language detected - AI expressing low certainty."
+    severity: info
+    enforcement: advisory
+    mvp_justification: "Non-blocking - uncertainty language may be appropriate when context is ambiguous."
+    description: "Response must contain ONLY YAML. No preamble, commentary, or explanation."
+    check:
+      type: text_analysis
+      action: detect_non_yaml_content
+      patterns:
+        - "^[^a-z_]*[A-Z].*:"  # Prose before YAML
+        - "Here is"
+        - "Here's"
+        - "I suggest"
+        - "My suggestion"
+        - "Based on"
+        - "```yaml"
+        - "```"
+    pass_condition: "No non-YAML text detected."
+    fail_condition: "Commentary, preamble, or explanation text detected."
+    failure_action: reject
+    failure_message: "Response contains text outside YAML structure."
+    severity: critical
+    enforcement: automatic
+
+  - rule_id: V003
+    category: structural
+    name: "No Extra Fields"
+    description: "Response must contain ONLY defined fields from the output contract."
+    check:
+      type: schema_validation
+      action: check_extra_keys
+      allowed_keys:
+        - suggested_description
+        - confidence
+        - used_sources
+        - warnings
+    pass_condition: "All top-level keys are in the allowed list."
+    fail_condition: "Extra top-level keys detected."
+    failure_action: reject
+    failure_message: "Response contains fields not defined in the output contract."
+    severity: high
+    enforcement: automatic
+
+  # ============================================================================
+  # CATEGORY 2: REQUIRED FIELDS
+  # ============================================================================
+  # Ensures all mandatory fields are present and non-empty.
+  # ============================================================================
+
+  - rule_id: V010
+    category: required_fields
+    name: "Suggested Description Present"
+    description: "Field 'suggested_description' must exist and be non-empty."
+    check:
+      type: field_presence
+      field: suggested_description
+      must_be_non_empty: true
+      must_be_string: true
+    pass_condition: "Field exists, is a string, and is not empty."
+    fail_condition: "Field is missing, empty, or not a string."
+    failure_action: reject
+    failure_message: "Required field 'suggested_description' is missing or empty."
+    severity: critical
+    enforcement: automatic
+
+  - rule_id: V011
+    category: required_fields
+    name: "Confidence Present"
+    description: "Field 'confidence' must exist and be non-empty."
+    check:
+      type: field_presence
+      field: confidence
+      must_be_non_empty: true
+      must_be_string: true
+    pass_condition: "Field exists, is a string, and is not empty."
+    fail_condition: "Field is missing, empty, or not a string."
+    failure_action: reject
+    failure_message: "Required field 'confidence' is missing or empty."
+    severity: critical
+    enforcement: automatic
+
+  - rule_id: V012
+    category: required_fields
+    name: "Used Sources Present"
+    description: "Field 'used_sources' must exist and be a non-empty array."
+    check:
+      type: field_presence
+      field: used_sources
+      must_be_array: true
+      min_items: 1
+    pass_condition: "Field exists, is an array, and contains at least 1 item."
+    fail_condition: "Field is missing, not an array, or empty."
+    failure_action: reject
+    failure_message: "Required field 'used_sources' is missing, not an array, or empty."
+    severity: critical
+    enforcement: automatic
+
+  # ============================================================================
+  # CATEGORY 3: FIELD VALUE CONSTRAINTS
+  # ============================================================================
+  # Validates that field values meet defined constraints.
+  # ============================================================================
+
+  - rule_id: V020
+    category: field_constraints
+    name: "Suggested Description Length"
+    description: "Suggested description must be between 10 and 500 characters."
+    check:
+      type: length_constraint
+      field: suggested_description
+      min_length: 10
+      max_length: 500
+    pass_condition: "Length is >= 10 and <= 500 characters."
+    fail_condition: "Length is < 10 or > 500 characters."
+    failure_action: reject
+    failure_message: "Suggested description length violates constraints (min: 10, max: 500)."
+    severity: high
+    enforcement: automatic
+
+  - rule_id: V021
+    category: field_constraints
+    name: "Confidence Allowed Values"
+    description: "Confidence must be exactly 'low', 'medium', or 'high'."
+    check:
+      type: enum_validation
+      field: confidence
+      allowed_values:
+        - low
+        - medium
+        - high
+      case_sensitive: true
+    pass_condition: "Value is one of the allowed values."
+    fail_condition: "Value is not in the allowed set."
+    failure_action: reject
+    failure_message: "Confidence value is invalid. Must be 'low', 'medium', or 'high'."
+    severity: critical
+    enforcement: automatic
+
+  - rule_id: V022
+    category: field_constraints
+    name: "Used Sources Item Count"
+    description: "Used sources array must contain between 1 and 10 items."
+    check:
+      type: array_size
+      field: used_sources
+      min_items: 1
+      max_items: 10
+    pass_condition: "Array size is >= 1 and <= 10."
+    fail_condition: "Array size is < 1 or > 10."
+    failure_action: reject
+    failure_message: "Used sources array violates size constraints (min: 1, max: 10)."
+    severity: high
+    enforcement: automatic
+
+  - rule_id: V023
+    category: field_constraints
+    name: "Used Sources Item Length"
+    description: "Each item in used_sources must be <= 200 characters."
+    check:
+      type: array_item_length
+      field: used_sources
+      max_item_length: 200
+    pass_condition: "All items are <= 200 characters."
+    fail_condition: "At least one item exceeds 200 characters."
+    failure_action: reject
+    failure_message: "At least one source excerpt exceeds 200 characters."
+    severity: medium
+    enforcement: automatic
+
+  - rule_id: V024
+    category: field_constraints
+    name: "Warnings Item Count (if present)"
+    description: "If warnings field exists, it must contain <= 5 items."
+    check:
+      type: array_size
+      field: warnings
+      optional: true
+      max_items: 5
+    pass_condition: "Field is absent OR array size is <= 5."
+    fail_condition: "Array size is > 5."
+    failure_action: reject
+    failure_message: "Warnings array exceeds maximum size of 5 items."
+    severity: medium
+    enforcement: automatic
+
+  - rule_id: V025
+    category: field_constraints
+    name: "Warnings Item Length (if present)"
+    description: "Each item in warnings must be <= 200 characters."
+    check:
+      type: array_item_length
+      field: warnings
+      optional: true
+      max_item_length: 200
+    pass_condition: "Field is absent OR all items are <= 200 characters."
+    fail_condition: "At least one item exceeds 200 characters."
+    failure_action: reject
+    failure_message: "At least one warning exceeds 200 characters."
+    severity: low
+    enforcement: automatic
+
+  # ============================================================================
+  # CATEGORY 4: HALLUCINATION DETECTION
+  # ============================================================================
+  # Detects indicators that the AI may have invented information or used
+  # external knowledge instead of grounding in RAG context.
+  # ============================================================================
+
+  - rule_id: V030
+    category: hallucination_detection
+    name: "Forbidden Phrases in Description"
+    description: "Suggested description must not contain phrases indicating uncertainty or external knowledge."
+    check:
+      type: pattern_detection
+      field: suggested_description
+      forbidden_patterns:
+        - "(?i)I don't know"
+        - "(?i)I'm not sure"
+        - "(?i)I am not sure"
+        - "(?i)based on my knowledge"
+        - "(?i)in general"
+        - "(?i)typically"
+        - "(?i)usually"
+        - "(?i)as far as I know"
+        - "(?i)it seems"
+        - "(?i)it appears"
+        - "(?i)probably"
+        - "(?i)might be"
+        - "(?i)could be"
+      case_insensitive: true
+    pass_condition: "No forbidden patterns detected."
+    fail_condition: "At least one forbidden pattern detected."
+    failure_action: reject
+    failure_message: "Suggested description contains forbidden phrases indicating uncertainty or external knowledge."
+    severity: critical
+    enforcement: automatic
+
+  - rule_id: V031
+    category: hallucination_detection
+    name: "No Placeholder Text"
+    description: "Suggested description must not be a placeholder or non-descriptive."
+    check:
+      type: pattern_detection
+      field: suggested_description
+      forbidden_patterns:
+        - "^N/A$"
+        - "^n/a$"
+        - "^None$"
+        - "^none$"
+        - "^Unknown$"
+        - "^unknown$"
+        - "^TBD$"
+        - "^TODO$"
+        - "^\\[.*\\]$"  # [placeholder]
+        - "^<.*>$"      # <placeholder>
+      case_insensitive: false
+    pass_condition: "No placeholder patterns detected."
+    fail_condition: "Placeholder pattern detected."
+    failure_action: reject
+    failure_message: "Suggested description is a placeholder or non-descriptive value."
+    severity: high
+    enforcement: automatic
+
+  - rule_id: V032
+    category: hallucination_detection
+    name: "Source Attribution Plausibility"
+    description: "Used sources must not reference 'general knowledge', 'training data', or vague sources."
+    check:
+      type: pattern_detection
+      field: used_sources
+      apply_to_array_items: true
+      forbidden_patterns:
+        - "(?i)general knowledge"
+        - "(?i)training data"
+        - "(?i)my knowledge"
+        - "(?i)common knowledge"
+        - "(?i)well-known"
+        - "(?i)as is known"
+        - "(?i)external source"
+        - "(?i)internet"
+        - "(?i)web search"
+      case_insensitive: true
+    pass_condition: "No forbidden patterns detected in any source."
+    fail_condition: "At least one source contains forbidden pattern."
+    failure_action: reject
+    failure_message: "Used sources reference external knowledge or vague attribution instead of RAG context."
+    severity: critical
+    enforcement: automatic
+
+  # ============================================================================
+  # CATEGORY 5: CONTEXT ALIGNMENT
+  # ============================================================================
+  # Validates that the response is aligned with the provided entity type and
+  # existing metadata (logic-based checks, not content analysis).
+  # ============================================================================
+
+  - rule_id: V040
+    category: context_alignment
+    name: "Entity Type Contradiction Warning"
+    description: "If entity type contradiction is detected, confidence should not be 'high'."
+    check:
+      type: conditional_logic
+      condition:
+        warnings_contain_pattern: "(?i)entity type.*contradict"
+      then_require:
+        field: confidence
+        must_not_equal: high
+    pass_condition: "If entity type contradiction warning exists, confidence is not 'high'."
+    fail_condition: "Entity type contradiction warning exists but confidence is 'high'."
+    failure_action: reject
+    failure_message: "Confidence cannot be 'high' when entity type contradiction is flagged."
+    severity: high
+    enforcement: automatic
+
+  - rule_id: V041
+    category: context_alignment
+    name: "Insufficient Context Warning"
+    description: "If insufficient context is flagged, confidence should be 'low'."
+    check:
+      type: conditional_logic
+      condition:
+        warnings_contain_pattern: "(?i)(insufficient|partial|incomplete) context"
+      then_require:
+        field: confidence
+        must_equal: low
+    pass_condition: "If insufficient context warning exists, confidence is 'low'."
+    fail_condition: "Insufficient context warning exists but confidence is not 'low'."
+    failure_action: reject
+    failure_message: "Confidence must be 'low' when insufficient context is flagged."
+    severity: high
+    enforcement: automatic
+
+  # ============================================================================
+  # CATEGORY 6: QUALITY THRESHOLDS
+  # ============================================================================
+  # Optional checks that flag responses for manual review rather than
+  # outright rejection. These support human-in-the-loop workflows.
+  # ============================================================================
+
+  - rule_id: V050
+    category: quality_threshold
+    name: "Low Confidence Flagging"
+    description: "Responses with 'low' confidence should be flagged for priority human review."
+    check:
+      type: flag_for_review
+      condition:
+        field: confidence
+        equals: low
+    pass_condition: "Always passes (flagging only)."
+    fail_condition: "N/A"
+    failure_action: flag
+    failure_message: "Low confidence response flagged for human review."
+    severity: info
+    enforcement: advisory
+
+  - rule_id: V051
+    category: quality_threshold
+    name: "Short Description Flagging"
+    description: "Descriptions under 30 characters may lack detail; flag for review."
+    check:
+      type: flag_for_review
+      condition:
+        field: suggested_description
+        length_less_than: 30
+    pass_condition: "Always passes (flagging only)."
+    fail_condition: "N/A"
+    failure_action: flag
+    failure_message: "Short description flagged for human review."
+    severity: info
+    enforcement: advisory
+
+  - rule_id: V052
+    category: quality_threshold
+    name: "Warnings Present Flagging"
+    description: "Responses with warnings should be flagged for closer review."
+    check:
+      type: flag_for_review
+      condition:
+        field: warnings
+        is_present: true
+        is_non_empty: true
+    pass_condition: "Always passes (flagging only)."
+    fail_condition: "N/A"
+    failure_action: flag
+    failure_message: "Response contains warnings; flagged for human review."
+    severity: info
+    enforcement: advisory
+
+# ==============================================================================
+# MVP VALIDATION EXECUTION WORKFLOW
+# ==============================================================================
+
+execution_workflow:
+  step_1:
+    description: "Run all BLOCKING rules in order (V001, V002, V010-V012, V020, V021, V030-V032, V040)."
+    action: "First failure causes immediate rejection. Do not proceed to next step."
+  
+  step_2:
+    description: "If all blocking rules pass, run ADVISORY rules (A001-A005)."
+    action: "Collect flags for human review prioritization. Do NOT reject based on advisory rules."
+  
+  step_3:
+    description: "If all blocking rules pass, mark response as ACCEPTED."
+    action: "Response is ready for human review. Include any advisory flags in review metadata."
+
+# ==============================================================================
+# VALIDATION RESPONSE FORMAT
+# ==============================================================================
+
+validation_response_format:
+  status:
+    type: enum
+    values:
+      - ACCEPTED
+      - REJECTED
+  
+  passed_blocking_rules:
+    type: array
+    description: "List of blocking rule IDs that passed."
+  
+  failed_blocking_rules:
+    type: array
+    description: "List of blocking rule IDs that failed (empty if ACCEPTED)."
+    items:
+      - rule_id: string
+        rule_name: string
+        failure_message: string
+        severity: string
+  
+  advisory_flags:
+    type: array
+    description: "List of advisory flags for human review (may be present even if ACCEPTED)."
+    items:
+      - rule_id: string
+        rule_name: string
+        flag_message: string
+  
+  summary:
+    type: string
+    description: "Human-readable summary of validation outcome."
+    examples:
+      - "Response ACCEPTED with 2 advisory flags (low confidence, short description)."
+      - "Response REJECTED: Failed V030 (explicit external knowledge reference)."
+
+# ==============================================================================
+# MVP RULE SUMMARY
+# ==============================================================================
+
+mvp_rule_summary:
+  total_rules: 16
+  blocking_rules: 11
+  advisory_rules: 5
+  
+  blocking_categories:
+    structural: 2  # V001, V002
+    required_fields: 3  # V010, V011, V012
+    basic_constraints: 2  # V020, V021
+    grounding: 3  # V030, V031, V032
+    context_handling: 1  # V040
+  
+  advisory_categories:
+    quality_monitoring: 5  # A001-A005
+  
+  removed_from_production_freeze:
+    - "Fine-grained hallucination phrase patterns (relaxed to core indicators only)"
+    - "Array size limits on used_sources (relaxed from blocking to advisory)"
+    - "Item length constraints (removed from blocking)"
+    - "Entity type contradiction logic (simplified)"
+    - "Warnings array constraints (removed from blocking)"
+  
+  post_mvp_evolution:
+    - "Additional hallucination detection patterns based on production data"
+    - "Context quality scoring and thresholds"
+    - "Entity-specific validation rules"
+    - "Advanced source citation quality checks"
+
+# ==============================================================================
+# USAGE NOTES
+# ==============================================================================
+
+usage_notes: |
+  MVP VALIDATION PHILOSOPHY:
+  
+  This rule set prioritizes ESSENTIAL safety over COMPREHENSIVE coverage:
+  - Blocking rules enforce core architectural guarantees (RAG-first, HITL, deterministic)
+  - Advisory rules provide quality insights without rejecting valid responses
+  - Post-MVP, additional blocking rules may be introduced based on production patterns
+  
+  IMPLEMENTATION GUIDANCE:
+  - Execute blocking rules sequentially; first failure = immediate rejection
+  - Collect all advisory flags regardless of blocking rule outcomes
+  - Log all validation results for audit and continuous improvement
+  - Do NOT skip or modify rules for individual requests
+  - Do NOT add custom rules outside this contract
+  
+  GOVERNANCE:
+  - Changes require new version + ADR + Architecture + Security approval
+  - MVP profile may be upgraded post-production without breaking changes
+  - Stricter rules introduced as additive (new rule IDs, not modifications)
+  
+  MONITORING RECOMMENDATIONS:
+  - Track rejection rate by blocking rule ID
+  - Analyze advisory flag distribution
+  - Monitor correlation between flags and human review outcomes
+  - Use insights to inform post-MVP rule enhancements

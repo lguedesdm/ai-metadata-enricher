@@ -1,0 +1,252 @@
+version: "1.0.0"
+status: frozen
+frozen_date: "2026-01-14"
+mvp_profile: "Minimal Safe MVP Output Contract"
+description: >
+  Frozen YAML output contract for AI-generated metadata suggestions (MVP).
+  This contract defines the EXACT structure that the AI MUST follow when
+  responding to metadata enrichment requests.
+  
+  Structure is unchanged from initial freeze, but validation enforcement
+  has been streamlined to essential safety checks for MVP deployment.
+  
+  GOVERNANCE: Any modification requires a new version, ADR, and approval from
+  Architecture and Security teams.
+
+change_control:
+  requires_new_version: true
+  requires_adr: true
+  approval_required:
+    - architecture_team
+    - security_team
+
+# ==============================================================================
+# OUTPUT CONTRACT SPECIFICATION
+# ==============================================================================
+# The AI MUST produce valid YAML that conforms to this exact structure.
+# No additional fields are permitted. No text outside YAML is permitted.
+# ==============================================================================
+
+contract_name: "metadata_enrichment_response"
+contract_version: "1.0.0"
+
+# ==============================================================================
+# REQUIRED FIELDS
+# ==============================================================================
+
+required_fields:
+  suggested_description:
+    type: string
+    description: >
+      The AI-suggested description for the asset, grounded strictly in the
+      provided RAG context. Must be concise, accurate, and traceable to sources.
+    constraints:
+      min_length: 10
+      max_length: 500
+      must_not_be_empty: true
+      must_not_contain_placeholder_text: true
+      forbidden_phrases:
+        - "I don't know"
+        - "I'm not sure"
+        - "Based on my knowledge"
+        - "In general"
+        - "Typically"
+    examples_of_valid_content:
+      - "Quarterly financial report for FY2025 covering revenue, expenses, and projections for the North American region."
+      - "High-resolution satellite imagery of coastal erosion sites collected in March 2024 for environmental impact assessment."
+    examples_of_invalid_content:
+      - ""
+      - "N/A"
+      - "I'm not sure what this asset is."
+      - "Based on my general knowledge, this appears to be a report."
+  
+  confidence:
+    type: enum
+    description: >
+      The AI's confidence in the suggested description based on the quality,
+      completeness, and relevance of the RAG context.
+    allowed_values:
+      - low
+      - medium
+      - high
+    must_not_be_empty: true
+    interpretation:
+      low: >
+        Context is sparse, ambiguous, or contradictory. Description is a best
+        effort but may be incomplete or inaccurate.
+      medium: >
+        Context is adequate but not comprehensive. Description is likely accurate
+        but may lack detail or nuance.
+      high: >
+        Context is rich, clear, and directly relevant. Description is well-grounded
+        and comprehensive.
+  
+  used_sources:
+    type: array
+    description: >
+      List of specific excerpts or identifiers from the RAG context that were
+      used to formulate the suggested description. Enables human verification.
+    item_type: string
+    constraints:
+      min_items: 1
+      max_items: 10
+      each_item_max_length: 200
+      must_not_be_empty: true
+    examples:
+      - "Document ID: DOC-12345, Excerpt: 'This report analyzes Q3 revenue trends...'"
+      - "Filename: 2024-coastal-survey.pdf, Page 3: 'Erosion rates increased by 12%...'"
+      - "Indexed content from blob: reports/annual-2024.docx, Section 2.1"
+
+# ==============================================================================
+# OPTIONAL FIELDS
+# ==============================================================================
+
+optional_fields:
+  warnings:
+    type: array
+    description: >
+      Optional list of warnings or caveats about the suggestion. Used when:
+      - Context is insufficient
+      - Context contradicts entity type or existing metadata
+      - Uncertainty exists about specific details
+      - Multiple interpretations are possible
+    item_type: string
+    constraints:
+      max_items: 5
+      each_item_max_length: 200
+    examples:
+      - "Context does not mention the asset's creation date; suggestion based solely on content analysis."
+      - "Entity type is 'dataset' but context suggests this may be a report; verification recommended."
+      - "Only partial context available; description may be incomplete."
+      - "RAG context contains conflicting information about the asset's purpose."
+
+# ==============================================================================
+# STRUCTURAL REQUIREMENTS (MVP)
+# ==============================================================================
+
+structural_requirements:
+  - rule: "Response MUST be valid YAML."
+    enforcement: "Validation V001 (blocking)"
+  
+  - rule: "Response MUST contain ONLY the defined fields."
+    enforcement: "Validation V002 (blocking - no extra text)"
+  
+  - rule: "Response MUST NOT contain any text outside the YAML structure."
+    enforcement: "Validation V002 (blocking)"
+  
+  - rule: "All required fields MUST be present."
+    enforcement: "Validation V010-V012 (blocking)"
+  
+  - rule: "Field values MUST match their defined types."
+    enforcement: "Validation V010-V012 (blocking)"
+  
+  - rule: "Enum fields MUST use only allowed values."
+    enforcement: "Validation V021 (blocking)"
+  
+  mvp_note: >
+    Fine-grained constraints (array sizes, item lengths) are relaxed to advisory
+    in MVP. Core requirements (parseability, required fields, types) remain blocking.
+
+# ==============================================================================
+# EXAMPLE OUTPUT (VALID)
+# ==============================================================================
+
+example_valid_output: |
+  suggested_description: "Annual sustainability report for 2024 detailing carbon emissions reductions, renewable energy adoption, and water conservation initiatives across global operations."
+  confidence: high
+  used_sources:
+    - "Document: sustainability-2024.pdf, Page 1: 'This report presents our environmental performance for fiscal year 2024.'"
+    - "Document: sustainability-2024.pdf, Page 5: 'Carbon emissions decreased by 18% compared to 2023 baseline.'"
+    - "Indexed blob: reports/sustainability/2024-annual.docx, Section 3.2: 'Renewable energy now powers 65% of facilities.'"
+  warnings: []
+
+# ==============================================================================
+# EXAMPLE OUTPUT (VALID WITH WARNINGS)
+# ==============================================================================
+
+example_valid_output_with_warnings: |
+  suggested_description: "Financial data compilation with revenue and expense figures, purpose and time period uncertain based on available context."
+  confidence: low
+  used_sources:
+    - "Document: data-export.csv, Header row: 'Date, Revenue, Expenses, Net Income'"
+  warnings:
+    - "Context does not specify the reporting period or organizational unit."
+    - "No metadata or documentation found describing the dataset's purpose."
+    - "Entity type is 'dataset' but format suggests it may be a report extract."
+
+# ==============================================================================
+# EXAMPLE OUTPUT (INVALID - WILL BE REJECTED)
+# ==============================================================================
+
+examples_of_invalid_output:
+  - example: |
+      # This is my suggestion:
+      suggested_description: "A report about something."
+      confidence: high
+    rejection_reason: "Contains commentary outside YAML structure."
+  
+  - example: |
+      suggested_description: ""
+      confidence: high
+      used_sources: []
+    rejection_reason: "Empty suggested_description and empty used_sources array."
+  
+  - example: |
+      suggested_description: "Based on my general knowledge, this appears to be a financial report."
+      confidence: medium
+      used_sources:
+        - "General knowledge about financial reports"
+    rejection_reason: "Uses forbidden phrase 'Based on my general knowledge'; source is not from RAG context."
+  
+  - example: |
+      confidence: high
+      used_sources:
+        - "Some document"
+    rejection_reason: "Missing required field 'suggested_description'."
+  
+  - example: |
+      suggested_description: "Quarterly report."
+      confidence: very_high
+      used_sources:
+        - "Document XYZ"
+    rejection_reason: "Invalid confidence value 'very_high' (must be low, medium, or high)."
+  
+  - example: |
+      suggested_description: "Annual report for 2024."
+      confidence: high
+      used_sources:
+        - "Document ABC"
+      extra_field: "This is not allowed"
+    rejection_reason: "Contains extra field 'extra_field' not in contract."
+
+# ==============================================================================
+# USAGE NOTES
+# ==============================================================================
+
+usage_notes: |
+  MVP OUTPUT CONTRACT - STRUCTURE UNCHANGED, VALIDATION STREAMLINED
+  
+  This contract is LLM-agnostic and must be enforced through:
+  1. Prompt engineering (instructing the LLM to follow this format)
+  2. Response parsing (validating YAML structure)
+  3. Automated validation (checking essential constraints only for MVP)
+  
+  The contract is designed for:
+  - Machine parseability
+  - Automated validation (MVP: 11 blocking rules)
+  - Human review and verification
+  - Audit trail and governance
+  
+  MVP Changes:
+  - Validation focuses on essential safety (parseability, required fields, grounding)
+  - Array size and item length constraints relaxed to advisory
+  - Fine-grained content patterns simplified
+  - Human review remains mandatory regardless of validation outcome
+  
+  Post-MVP Evolution:
+  - Additional blocking rules may be introduced
+  - Stricter constraints on field content
+  - Enhanced grounding verification
+  
+  Do NOT modify this contract for individual requests. If changes are needed,
+  create a new version following the governance process.
