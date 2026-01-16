@@ -1,0 +1,77 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "4943984740920464349"
+    }
+  },
+  "parameters": {
+    "cosmosAccountName": {
+      "type": "string",
+      "defaultValue": "cosmos-ai-metadata-dev"
+    },
+    "databaseName": {
+      "type": "string",
+      "defaultValue": "metadata_enricher"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+      "apiVersion": "2024-05-15",
+      "name": "[format('{0}/{1}/{2}', parameters('cosmosAccountName'), parameters('databaseName'), 'state')]",
+      "properties": {
+        "resource": {
+          "id": "state",
+          "partitionKey": {
+            "paths": [
+              "/entityType"
+            ],
+            "kind": "Hash"
+          },
+          "defaultTtl": 604800
+        },
+        "options": {}
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+      "apiVersion": "2024-05-15",
+      "name": "[format('{0}/{1}/{2}', parameters('cosmosAccountName'), parameters('databaseName'), 'audit')]",
+      "properties": {
+        "resource": {
+          "id": "audit",
+          "partitionKey": {
+            "paths": [
+              "/entityType"
+            ],
+            "kind": "Hash"
+          },
+          "defaultTtl": 15552000
+        },
+        "options": {}
+      }
+    }
+  ],
+  "outputs": {
+    "stateContainerName": {
+      "type": "string",
+      "value": "state"
+    },
+    "stateTtl": {
+      "type": "int",
+      "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers', parameters('cosmosAccountName'), parameters('databaseName'), 'state'), '2024-05-15').resource.defaultTtl]"
+    },
+    "auditContainerName": {
+      "type": "string",
+      "value": "audit"
+    },
+    "auditTtl": {
+      "type": "int",
+      "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers', parameters('cosmosAccountName'), parameters('databaseName'), 'audit'), '2024-05-15').resource.defaultTtl]"
+    }
+  }
+}
