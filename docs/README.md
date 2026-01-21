@@ -8,6 +8,7 @@ This directory contains architecture, governance, and technical documentation fo
 docs/
 ├── architecture.md       # System architecture overview
 ├── governance.md         # Governance and compliance framework
+├── incremental-indexing-strategy.md # Conceptual contract for incremental indexing (Blob → Azure AI Search)
 ├── adr/                 # Architecture Decision Records
 │   ├── README.md
 │   └── template.md      # ADR template
@@ -23,6 +24,7 @@ docs/
 - Data flow and processing pipelines
 - Integration patterns
 - Deployment architecture
+- Incremental indexing strategy (conceptual): see [incremental-indexing-strategy.md](incremental-indexing-strategy.md)
 
 ### Governance Documentation
 - Compliance requirements and controls
