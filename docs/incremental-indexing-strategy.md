@@ -21,6 +21,17 @@ References:
   - Modified documents: `lastUpdated` indicates a newer change than the last indexed run → eligible.
   - Unchanged documents: `lastUpdated` not newer than the last indexed run → ignored in incremental runs.
 
+### Deterministic Hash (Material Change) — Domain Module
+
+Beyond `lastUpdated`, higher layers may use a **domain-only, deterministic SHA-256 hash** to verify whether an asset has **materially** changed:
+
+- Hash input: normalized representation that removes volatile fields and sorts collections deterministically.
+- Serialization: canonical JSON (sorted keys, compact, UTF-8).
+- Behavior: identical logical assets → same hash; material metadata changes → different hash.
+- Contract and implementation: [src/domain/change_detection/asset_contract.md](../src/domain/change_detection/asset_contract.md), [src/domain/change_detection/README.md](../src/domain/change_detection/README.md).
+
+Scope note: This document does not define hash storage/comparison; orchestration decides usage alongside `lastUpdated`. The hashing module is pure domain logic with no Azure dependencies.
+
 ## Index Update Behavior (Incremental)
 
 - **Incremental-only by default**: Normal executions update the index for eligible items (new/modified) without recreating the entire index.

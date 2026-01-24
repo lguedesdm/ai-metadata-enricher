@@ -256,6 +256,24 @@ Internet
 - **Real-Time Processing**: Stream processing with Azure Stream Analytics
 - **Advanced AI**: Custom ML models for domain-specific enrichment
 
+## Domain Change Detection (SHA-256)
+
+To support deterministic, incremental behavior without coupling to infrastructure, the platform defines a pure domain module for change detection based on SHA-256 hashing:
+
+- Deterministic normalization: removes volatile fields (timestamps, scan IDs, underscore-prefixed metadata) and sorts collections (tags by value, relationships by `id`, columns by `name`).
+- Canonical serialization: normalized assets are serialized to compact JSON with sorted keys.
+- SHA-256 hashing: the hash is computed from the canonical JSON and returned as lowercase hex.
+- Material contract: documented fields included in hashing are defined in [src/domain/change_detection/asset_contract.md](src/domain/change_detection/asset_contract.md) and enforced by [src/domain/change_detection/normalizer.py](src/domain/change_detection/normalizer.py).
+
+Scope boundaries:
+- Domain-only: no Azure SDKs, storage, queues, or orchestrators.
+- Deterministic: logically identical assets always produce identical hashes; material changes produce different hashes.
+- Integration: higher layers (orchestrator/services) may compare current vs. stored hashes to decide re-indexing, without modifying this module.
+
+References:
+- Module overview and API: [src/domain/change_detection/README.md](src/domain/change_detection/README.md)
+- Unit tests (determinism/materiality): [tests/test_change_detection.py](tests/test_change_detection.py)
+
 ## References
 
 - [Azure Well-Architected Framework](https://learn.microsoft.com/en-us/azure/architecture/framework/)

@@ -9,6 +9,7 @@ docs/
 ├── architecture.md       # System architecture overview
 ├── governance.md         # Governance and compliance framework
 ├── incremental-indexing-strategy.md # Conceptual contract for incremental indexing (Blob → Azure AI Search)
+├── search-index-design.md # Azure AI Search index design (v1, frozen)
 ├── adr/                 # Architecture Decision Records
 │   ├── README.md
 │   └── template.md      # ADR template
@@ -25,6 +26,8 @@ docs/
 - Integration patterns
 - Deployment architecture
 - Incremental indexing strategy (conceptual): see [incremental-indexing-strategy.md](incremental-indexing-strategy.md)
+ - Change detection (domain, SHA-256): see [src/domain/change_detection/README.md](../src/domain/change_detection/README.md) and contract [asset_contract.md](../src/domain/change_detection/asset_contract.md)
+ - Search index design: see [search-index-design.md](search-index-design.md)
 
 ### Governance Documentation
 - Compliance requirements and controls
