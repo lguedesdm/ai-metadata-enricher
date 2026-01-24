@@ -24,6 +24,10 @@ from .normalizer import (
     get_volatile_fields,
     is_volatile_field,
 )
+from .decision import (
+    DecisionResult,
+    decide_reprocess_or_skip,
+)
 
 __all__ = [
     "compute_asset_hash",
@@ -33,4 +37,6 @@ __all__ = [
     "get_material_fields",
     "get_volatile_fields",
     "is_volatile_field",
+    "DecisionResult",
+    "decide_reprocess_or_skip",
 ]
