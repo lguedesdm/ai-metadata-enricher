@@ -152,4 +152,11 @@ The following artifacts define deterministic, auditable behavior for generating 
 ### Locations
 - Prompt Template: [`./v1-suggested-description.prompt.md`](./v1-suggested-description.prompt.md)
 - Grounding Rules: [`./v1-grounding-rules.md`](./v1-grounding-rules.md)
+ - Output Spec (YAML): [`./v1-suggested-description.output.yaml`](./v1-suggested-description.output.yaml)
+
+### Output Spec Summary (MVP)
+- Fixed fields and strict ordering: `suggested_description`, `confidence`, `used_sources`, optional `warnings`.
+- Deterministic rules: valid YAML only; no text before/after; no comments/markdown; no extra fields.
+- Examples: includes valid example and multiple invalid examples (extra fields, non-YAML text, incorrect structure, wrong order).
+- Scope boundaries: Output format only—no runtime parsing, validation, scoring, or LLM integration.
 

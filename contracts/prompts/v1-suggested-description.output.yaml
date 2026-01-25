@@ -1,0 +1,161 @@
+version: "1.0.0"
+status: draft
+mvp_profile: "Deterministic Suggested Description Output"
+description: >
+  Deterministic YAML output specification for Suggested Description responses.
+  Defines a fixed, minimal structure the LLM MUST return for Purview's
+  Suggested Description field. This is a design-time contract only.
+
+spec_name: "suggested_description_output"
+spec_version: "1.0.0"
+
+# ==============================================================================
+# OUTPUT FIELDS (FIXED SET)
+# ==============================================================================
+# The response MUST contain ONLY these fields, in this exact order.
+# No additional fields are permitted. No text outside YAML is permitted.
+# ==============================================================================
+
+fields:
+  order:
+    - suggested_description
+    - confidence
+    - used_sources
+    - warnings
+  required:
+    - suggested_description
+    - confidence
+    - used_sources
+  optional:
+    - warnings
+  forbidden: []
+
+# ==============================================================================
+# FIELD DEFINITIONS
+# ==============================================================================
+
+field_definitions:
+  suggested_description:
+    type: string
+    constraints:
+      min_length: 10
+      max_length: 500
+      must_not_be_empty: true
+      forbidden_phrases:
+        - "Based on my knowledge"
+        - "In general"
+        - "Typically"
+        - "Probably"
+        - "Likely"
+        - "Appears to"
+    notes: >
+      Business-friendly, plain language (1–3 sentences). No references to the
+      LLM, the prompt, or internal systems. Advisory text only.
+
+  confidence:
+    type: enum
+    allowed_values:
+      - low
+      - medium
+      - high
+    notes: >
+      Confidence reflects input sufficiency and clarity. When inputs are
+      insufficient, confidence MUST be "low".
+
+  used_sources:
+    type: array
+    item_type: string
+    constraints:
+      min_items: 1
+      max_items: 10
+      each_item_max_length: 200
+    notes: >
+      Each item should identify a specific excerpt or pointer from retrieved
+      context (e.g., document name + page or section). No external knowledge.
+
+  warnings:
+    type: array
+    item_type: string
+    constraints:
+      max_items: 5
+      each_item_max_length: 200
+    notes: >
+      Optional caveats when context is insufficient or contradictory. Do not
+      include system references or speculation.
+
+# ==============================================================================
+# LLM OUTPUT RULES (MUST FOLLOW)
+# ==============================================================================
+
+rules:
+  - "Response MUST be valid YAML only."
+  - "Response MUST contain ONLY the specified fields."
+  - "Response MUST present fields in the exact order: suggested_description, confidence, used_sources, warnings."
+  - "Response MUST NOT include any text before or after YAML."
+  - "Response MUST NOT include comments, explanations, or markdown formatting."
+  - "Response MUST NOT include extra fields beyond this specification."
+  - "Response MUST NOT reference the LLM, the prompt, or internal systems."
+
+# ==============================================================================
+# EXAMPLES (VALID / INVALID)
+# ==============================================================================
+
+example_valid: |
+  suggested_description: "Annual sustainability report for 2024 detailing carbon emissions reductions, renewable energy adoption, and water conservation initiatives across global operations."
+  confidence: high
+  used_sources:
+    - "Document: sustainability-2024.pdf, Page 1"
+    - "Document: sustainability-2024.pdf, Page 5"
+  warnings: []
+
+examples_invalid:
+  - reason: "Extra field not in spec"
+    output: |
+      suggested_description: "Annual report for 2024."
+      confidence: high
+      used_sources:
+        - "Document ABC"
+      warnings: []
+      extra_field: "not allowed"
+
+  - reason: "Non-YAML text before YAML"
+    output: |
+      This is my answer:
+      suggested_description: "Quarterly revenue summary for 2025."
+      confidence: medium
+      used_sources:
+        - "q1-2025-report.pdf, Page 2"
+
+  - reason: "Incorrect structure: missing required field 'used_sources'"
+    output: |
+      suggested_description: "Data extract covering weekly inventory levels across regions."
+      confidence: high
+
+  - reason: "Incorrect order"
+    output: |
+      confidence: high
+      suggested_description: "Customer satisfaction dashboard with monthly trends."
+      used_sources:
+        - "cx-dashboard.md, Section Overview"
+
+  - reason: "Comments or markdown present"
+    output: |
+      # Suggested description
+      suggested_description: "Supply chain performance report for Q3 2025."
+      confidence: medium
+      used_sources:
+        - "scm-q3-2025.pdf, Page 1"
+
+# ==============================================================================
+# MVP NOTES / RATIONALE
+# ==============================================================================
+
+notes: >
+  Chosen for MVP to maximize determinism and safe parsing. Fixed fields and
+  strict ordering reduce ambiguity across LLM providers, enabling consistent
+  validation and governance. The minimal set balances usability with control.
+
+scope_boundaries: >
+  This specification defines output format only. It does NOT implement runtime
+  parsing, validation, scoring, or integration. The Orchestrator will consume
+  this contract unchanged in later phases.
