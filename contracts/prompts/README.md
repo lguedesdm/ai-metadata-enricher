@@ -128,3 +128,28 @@ If you see AI output that violates these rules, it should have been rejected by 
 ---
 
 **Reminder:** This is a production-oriented, governed platform. Prompts are not experimental. They are auditable contracts.
+
+---
+
+## Structured Prompt & Grounding Rules (Design-Time Contracts)
+
+The following artifacts define deterministic, auditable behavior for generating Purview Suggested Descriptions using RAG-only inputs. They are design-time contracts and must not be embedded in application code.
+
+### v1-suggested-description.prompt.md (Design-Time)
+- Purpose: Provides a structured prompt with explicit sections and placeholders.
+- Sections: System Role, Task Objective, Asset Metadata ({{asset_metadata}}), Retrieved Context ({{retrieved_context}}), Grounding Rules, Output Instructions.
+- Output: Business-friendly text only, 1–3 sentences, no references to the LLM, prompt, or internal systems; intended for Purview’s Suggested Description field.
+
+### v1-grounding-rules.md (Design-Time)
+- Purpose: Defines strict rules to prevent hallucinations and enforce input-only grounding.
+- Key rules: Use only inputs; never invent/infer; avoid speculative language; handle sensitive info conservatively; state uncertainty explicitly when context is insufficient; keep output business-friendly and free of internal references.
+
+### Intent and Scope
+- Intent: Establish a clear, governance-ready foundation for later runtime execution.
+- Prevents hallucinations: Rules prohibit invention/speculation and restrict sensitive information.
+- Scope boundaries: No LLM calls, no runtime orchestration, no YAML/JSON enforcement here. Later tasks will add formatting contracts and validation.
+
+### Locations
+- Prompt Template: [`./v1-suggested-description.prompt.md`](./v1-suggested-description.prompt.md)
+- Grounding Rules: [`./v1-grounding-rules.md`](./v1-grounding-rules.md)
+
