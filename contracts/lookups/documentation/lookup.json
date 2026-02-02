@@ -1,0 +1,15 @@
+{
+  "containerPurpose": "Human-authored documentation for governance and RAG context",
+  "contentType": "application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, text/markdown",
+  "producer": "Architecture and business teams",
+  "schema": {
+    "name": "documentation-ingestion-contract",
+    "version": "1.0.0",
+    "frozen": true
+  },
+  "versioningStrategy": {
+    "allowsMultipleFiles": true,
+    "overwriteBehavior": "Overwrite permitted for same filename; filenames remain stable",
+    "expectedUpdateFrequency": "Ad hoc as authored"
+  }
+}

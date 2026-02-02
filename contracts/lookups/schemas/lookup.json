@@ -1,0 +1,15 @@
+{
+  "containerPurpose": "JSON schemas governing producer exports",
+  "contentType": "application/json",
+  "producer": "Architecture",
+  "schema": {
+    "name": "json-schema",
+    "version": "2020-12",
+    "frozen": true
+  },
+  "versioningStrategy": {
+    "allowsMultipleFiles": true,
+    "overwriteBehavior": "New files for new versions; avoid overwriting established contracts",
+    "expectedUpdateFrequency": "Infrequent; only on contract changes"
+  }
+}

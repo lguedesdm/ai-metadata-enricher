@@ -1,0 +1,15 @@
+{
+  "containerPurpose": "Synergy metadata exports for indexing and RAG context",
+  "contentType": "application/json",
+  "producer": "Synergy",
+  "schema": {
+    "name": "synergy-export",
+    "version": "1.0.0",
+    "frozen": true
+  },
+  "versioningStrategy": {
+    "allowsMultipleFiles": true,
+    "overwriteBehavior": "Overwrite permitted for stable identifiers; re-uploads replace prior blob",
+    "expectedUpdateFrequency": "Incremental on source changes; at least daily"
+  }
+}
