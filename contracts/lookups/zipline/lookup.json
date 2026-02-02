@@ -1,5 +1,5 @@
 {
-  "containerPurpose": "Zipline metadata exports for indexing and RAG context",
+  "containerPurpose": "Authoritative Zipline metadata exports for enterprise data governance",
   "contentType": "application/json",
   "producer": "Zipline",
   "schema": {

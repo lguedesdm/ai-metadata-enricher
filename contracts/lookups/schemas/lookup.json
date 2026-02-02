@@ -1,7 +1,7 @@
 {
   "containerPurpose": "JSON schemas governing producer exports",
   "contentType": "application/json",
-  "producer": "Architecture",
+  "producer": "Platform Architecture",
   "schema": {
     "name": "json-schema",
     "version": "2020-12",

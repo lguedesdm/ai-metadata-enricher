@@ -1,6 +1,6 @@
 {
   "containerPurpose": "Human-authored documentation for governance and RAG context",
-  "contentType": "application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, text/markdown",
+  "contentType": "PDF, Word, Excel, and Markdown documents authored by humans",
   "producer": "Architecture and business teams",
   "schema": {
     "name": "documentation-ingestion-contract",

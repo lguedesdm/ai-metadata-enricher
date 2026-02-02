@@ -1,5 +1,5 @@
 {
-  "containerPurpose": "Synergy metadata exports for indexing and RAG context",
+  "containerPurpose": "Authoritative Synergy metadata exports for enterprise data governance",
   "contentType": "application/json",
   "producer": "Synergy",
   "schema": {
