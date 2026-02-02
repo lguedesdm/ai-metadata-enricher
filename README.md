@@ -68,6 +68,12 @@ This repository follows enterprise governance standards. All changes require:
 - Automated validation (linting, security scanning, tests)
 - Approval from designated code owners
 
+## Producer-side JSON Validation
+
+All structured JSON exports delivered to Blob Storage must be validated by the producing system against the frozen schema prior to upload.
+
+Blob Storage represents a strict ingestion boundary. Invalid or non-conformant payloads must not be uploaded and will not be corrected by downstream consumers.
+
 ---
 
 **Status**: Active Development  
