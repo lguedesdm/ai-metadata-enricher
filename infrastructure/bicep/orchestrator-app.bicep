@@ -66,6 +66,12 @@ param serviceBusQueueName string = 'metadata-ingestion'
 @secure()
 param appInsightsConnectionString string = ''
 
+@description('Cosmos DB account endpoint (e.g. https://cosmos-ai-metadata-dev.documents.azure.com:443/).')
+param cosmosEndpoint string = ''
+
+@description('Cosmos DB database name.')
+param cosmosDatabaseName string = 'metadata_enricher'
+
 // =====================================================
 // Naming Conventions
 // =====================================================
@@ -141,6 +147,14 @@ resource orchestratorApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ENVIRONMENT'
               value: environment
+            }
+            {
+              name: 'COSMOS_ENDPOINT'
+              value: cosmosEndpoint
+            }
+            {
+              name: 'COSMOS_DATABASE_NAME'
+              value: cosmosDatabaseName
             }
           ]
         }

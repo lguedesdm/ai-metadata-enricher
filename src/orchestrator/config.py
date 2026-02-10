@@ -54,6 +54,26 @@ class OrchestratorConfig:
         )
 
         # -----------------------------------------------------------------
+        # Azure Cosmos DB (State Store) — Managed Identity only
+        # -----------------------------------------------------------------
+        # Cosmos DB account endpoint, e.g. "https://cosmos-ai-metadata-dev.documents.azure.com:443/"
+        # REQUIRED — the Orchestrator must not start without a valid Cosmos DB endpoint.
+        self.cosmos_endpoint: str = os.environ["COSMOS_ENDPOINT"]
+
+        # Database name within the Cosmos DB account
+        self.cosmos_database_name: str = os.environ.get(
+            "COSMOS_DATABASE_NAME", "metadata_enricher"
+        )
+
+        # Container names — must match existing containers
+        self.cosmos_state_container: str = os.environ.get(
+            "COSMOS_STATE_CONTAINER", "state"
+        )
+        self.cosmos_audit_container: str = os.environ.get(
+            "COSMOS_AUDIT_CONTAINER", "audit"
+        )
+
+        # -----------------------------------------------------------------
         # Runtime
         # -----------------------------------------------------------------
         self.environment: str = os.environ.get("ENVIRONMENT", "dev")
@@ -63,5 +83,7 @@ class OrchestratorConfig:
             f"OrchestratorConfig("
             f"namespace={self.service_bus_namespace!r}, "
             f"queue={self.service_bus_queue_name!r}, "
+            f"cosmosEndpoint={self.cosmos_endpoint!r}, "
+            f"cosmosDatabase={self.cosmos_database_name!r}, "
             f"env={self.environment!r})"
         )

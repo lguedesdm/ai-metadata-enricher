@@ -34,6 +34,7 @@ from azure.identity import DefaultAzureCredential
 from azure.servicebus import ServiceBusClient, ServiceBusReceiveMode
 
 from .config import OrchestratorConfig
+from .cosmos_state_store import CosmosStateStore
 from .lock_renewal import LockRenewer
 from .message_handler import handle_message
 
@@ -71,12 +72,25 @@ class ServiceBusConsumer:
             credential=self._credential,
         )
 
+        # -- Cosmos DB State Store (Managed Identity) -------------------
+        # COSMOS_ENDPOINT is mandatory — config enforces this at startup.
+        self._state_store = CosmosStateStore(config)
+        logger.info(
+            "Cosmos DB state store wired — auth: Managed Identity",
+            extra={
+                "cosmosEndpoint": config.cosmos_endpoint,
+                "authMethod": "ManagedIdentity/DefaultAzureCredential",
+            },
+        )
+
     # ------------------------------------------------------------------
     # Timeout helper
     # ------------------------------------------------------------------
     @staticmethod
     def _process_with_timeout(
-        body: str, timeout_seconds: int
+        body: str,
+        timeout_seconds: int,
+        state_store: "CosmosStateStore | None" = None,
     ) -> "tuple[object | None, bool]":
         """
         Run handle_message in a thread with a timeout.
@@ -86,7 +100,9 @@ class ServiceBusConsumer:
         - If timed out:         (None, True)
         """
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future: Future = executor.submit(handle_message, body)
+            future: Future = executor.submit(
+                handle_message, body, state_store,
+            )
             try:
                 result = future.result(timeout=timeout_seconds)
                 return result, False
@@ -170,7 +186,9 @@ class ServiceBusConsumer:
                         body = str(message)
 
                         result, timed_out = self._process_with_timeout(
-                            body, self._config.message_timeout_seconds,
+                            body,
+                            self._config.message_timeout_seconds,
+                            state_store=self._state_store,
                         )
 
                         if timed_out:
@@ -250,9 +268,10 @@ class ServiceBusConsumer:
         logger.info("Consumer stopped")
 
     def close(self) -> None:
-        """Close the Service Bus client and credential."""
+        """Close the Service Bus client, state store, and credential."""
         try:
             self._client.close()
+            self._state_store.close()
             self._credential.close()
             logger.info("Service Bus consumer closed")
         except Exception as exc:

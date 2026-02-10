@@ -56,10 +56,15 @@ def _make_config(
     """Create an OrchestratorConfig with test-friendly defaults."""
     monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
     monkeypatch.setenv("SERVICE_BUS_QUEUE_NAME", "test-queue")
+    monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
     monkeypatch.setenv("BATCH_SIZE", str(batch_size))
     monkeypatch.setenv("LOCK_RENEW_INTERVAL_SECONDS", str(lock_renew_interval))
     monkeypatch.setenv("MESSAGE_TIMEOUT_SECONDS", str(message_timeout))
     monkeypatch.setenv("MAX_WAIT_TIME_SECONDS", str(max_wait_time))
+    # Prevent real Cosmos DB connections in unit tests
+    monkeypatch.setattr(
+        "src.orchestrator.consumer.CosmosStateStore", MagicMock()
+    )
     return OrchestratorConfig()
 
 
@@ -95,36 +100,42 @@ class TestConfigBatchingVars:
 
     def test_default_batch_size(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
+        monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.delenv("BATCH_SIZE", raising=False)
         config = OrchestratorConfig()
         assert config.batch_size == 5
 
     def test_custom_batch_size(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
+        monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.setenv("BATCH_SIZE", "10")
         config = OrchestratorConfig()
         assert config.batch_size == 10
 
     def test_default_lock_renew_interval(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
+        monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.delenv("LOCK_RENEW_INTERVAL_SECONDS", raising=False)
         config = OrchestratorConfig()
         assert config.lock_renew_interval_seconds == 15
 
     def test_custom_lock_renew_interval(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
+        monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.setenv("LOCK_RENEW_INTERVAL_SECONDS", "30")
         config = OrchestratorConfig()
         assert config.lock_renew_interval_seconds == 30
 
     def test_default_message_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
+        monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.delenv("MESSAGE_TIMEOUT_SECONDS", raising=False)
         config = OrchestratorConfig()
         assert config.message_timeout_seconds == 120
 
     def test_custom_message_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
+        monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.setenv("MESSAGE_TIMEOUT_SECONDS", "60")
         config = OrchestratorConfig()
         assert config.message_timeout_seconds == 60

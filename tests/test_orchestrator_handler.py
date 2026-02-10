@@ -136,6 +136,56 @@ class TestHandleMessage:
         assert result.decision == "REPROCESS"
 
 
+class TestCosmosReadFallback:
+    """Tests verifying deterministic REPROCESS fallback on Cosmos read failure."""
+
+    def test_cosmos_read_failure_returns_reprocess(self) -> None:
+        """When state_store.get_state() raises, handler must return REPROCESS — not fail."""
+        from unittest.mock import MagicMock
+
+        mock_store = MagicMock()
+        mock_store.get_state.side_effect = RuntimeError("Cosmos 503 Service Unavailable")
+
+        body = json.dumps(VALID_ASSET)
+        result = handle_message(body, state_store=mock_store)
+
+        assert result.success is True
+        assert result.decision == "REPROCESS"
+        assert result.asset_id == "synergy.student.enrollment.table"
+        assert result.error is None
+
+    def test_cosmos_read_timeout_returns_reprocess(self) -> None:
+        """Timeout during Cosmos read should also produce REPROCESS."""
+        from unittest.mock import MagicMock
+
+        mock_store = MagicMock()
+        mock_store.get_state.side_effect = TimeoutError("Cosmos request timed out")
+
+        body = json.dumps(VALID_ASSET)
+        result = handle_message(body, state_store=mock_store)
+
+        assert result.success is True
+        assert result.decision == "REPROCESS"
+
+    def test_cosmos_read_failure_still_writes_state(self) -> None:
+        """After read failure fallback, handler should still attempt state+audit writes."""
+        from unittest.mock import MagicMock
+
+        mock_store = MagicMock()
+        mock_store.get_state.side_effect = ConnectionError("Transient failure")
+        # upsert methods should succeed
+        mock_store.upsert_state.return_value = None
+        mock_store.upsert_audit.return_value = None
+
+        body = json.dumps(VALID_ASSET)
+        result = handle_message(body, state_store=mock_store)
+
+        assert result.success is True
+        assert result.decision == "REPROCESS"
+        mock_store.upsert_state.assert_called_once()
+        mock_store.upsert_audit.assert_called_once()
+
+
 class TestHandleMessageDeterminism:
     """Tests verifying deterministic behavior of the handler."""
 
