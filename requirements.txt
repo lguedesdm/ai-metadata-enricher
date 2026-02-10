@@ -14,3 +14,13 @@ azure-cosmos>=4.7.0,<5.0.0
 
 # Azure Monitor OpenTelemetry - Application Insights integration
 azure-monitor-opentelemetry>=1.3.0,<2.0.0
+
+# =============================================================================
+# Enrichment Layer Dependencies (isolated clients — not used by Orchestrator)
+# =============================================================================
+
+# Azure OpenAI via the OpenAI Python SDK (Azure AD / Managed Identity auth)
+openai>=1.40.0,<2.0.0
+
+# HTTP requests for Purview Atlas REST API calls
+requests>=2.31.0,<3.0.0
