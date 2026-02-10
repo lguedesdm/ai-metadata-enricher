@@ -29,6 +29,24 @@ class OrchestratorConfig:
         )
 
         # -----------------------------------------------------------------
+        # Batching & Lock Management
+        # -----------------------------------------------------------------
+        # Maximum number of messages to receive per batch
+        self.batch_size: int = int(
+            os.environ.get("BATCH_SIZE", "5")
+        )
+
+        # Interval (seconds) between lock renewal attempts
+        self.lock_renew_interval_seconds: int = int(
+            os.environ.get("LOCK_RENEW_INTERVAL_SECONDS", "15")
+        )
+
+        # Maximum time (seconds) allowed for processing a single message
+        self.message_timeout_seconds: int = int(
+            os.environ.get("MESSAGE_TIMEOUT_SECONDS", "120")
+        )
+
+        # -----------------------------------------------------------------
         # Application Insights
         # -----------------------------------------------------------------
         self.applicationinsights_connection_string: str = os.environ.get(

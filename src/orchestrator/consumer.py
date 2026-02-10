@@ -2,27 +2,39 @@
 Azure Service Bus consumer for the Orchestrator.
 
 Connects to Service Bus using Managed Identity (DefaultAzureCredential),
-receives messages in peek-lock mode, and delegates processing to the
-message handler.
+receives messages in peek-lock mode with batch support, and delegates
+processing to the message handler.
 
 Message completion semantics:
 - Success (SKIP or REPROCESS) → message.complete()
 - Unexpected error → message.abandon()  (returns to queue for retry)
+- Processing timeout → message.abandon()
+
+Features:
+- Configurable batch receive (max_message_count via BATCH_SIZE)
+- Sequential processing within each batch (no parallelisation)
+- Manual lock renewal via background thread per message
+- Per-message processing timeout
+- Structured batch-level logging (start, end, size, duration)
 
 This consumer does NOT:
 - Implement manual dead-letter logic
-- Parallelize consumption
+- Parallelize message processing
 - Implement advanced retry policies
-- Implement batch processing
+- Create concurrent workers
 """
 
 import logging
+import time
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
 from azure.identity import DefaultAzureCredential
 from azure.servicebus import ServiceBusClient, ServiceBusReceiveMode
 
 from .config import OrchestratorConfig
+from .lock_renewal import LockRenewer
 from .message_handler import handle_message
 
 logger = logging.getLogger("orchestrator.consumer")
@@ -30,7 +42,8 @@ logger = logging.getLogger("orchestrator.consumer")
 
 class ServiceBusConsumer:
     """
-    Single-threaded Service Bus consumer using peek-lock mode.
+    Single-threaded Service Bus consumer using peek-lock mode with
+    batch receive and per-message lock renewal.
 
     Lifecycle:
         consumer = ServiceBusConsumer(config)
@@ -47,6 +60,9 @@ class ServiceBusConsumer:
             extra={
                 "namespace": config.service_bus_namespace,
                 "queue": config.service_bus_queue_name,
+                "batchSize": config.batch_size,
+                "lockRenewIntervalSeconds": config.lock_renew_interval_seconds,
+                "messageTimeoutSeconds": config.message_timeout_seconds,
             },
         )
 
@@ -55,14 +71,45 @@ class ServiceBusConsumer:
             credential=self._credential,
         )
 
+    # ------------------------------------------------------------------
+    # Timeout helper
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _process_with_timeout(
+        body: str, timeout_seconds: int
+    ) -> "tuple[object | None, bool]":
+        """
+        Run handle_message in a thread with a timeout.
+
+        Returns (result, timed_out).
+        - If completed in time: (MessageProcessingResult, False)
+        - If timed out:         (None, True)
+        """
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future: Future = executor.submit(handle_message, body)
+            try:
+                result = future.result(timeout=timeout_seconds)
+                return result, False
+            except Exception:
+                # TimeoutError or execution error
+                return None, True
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
     def run(self, is_running: Callable[[], bool]) -> None:
         """
-        Receive and process messages until is_running() returns False.
+        Receive and process batches of messages until is_running()
+        returns False.
 
-        Each message is processed sequentially:
-        1. Receive one message (peek-lock)
-        2. Delegate to handle_message()
-        3. Complete or abandon based on result
+        For each batch:
+        1. Log batch_start with batchId and size
+        2. For each message (sequentially):
+           a. Start lock renewal
+           b. Process message via handle_message (with timeout)
+           c. Complete or abandon based on result
+           d. Stop lock renewal
+        3. Log batch_end with total duration
 
         Args:
             is_running: Callable that returns True while the consumer
@@ -73,6 +120,8 @@ class ServiceBusConsumer:
             extra={
                 "queue": self._config.service_bus_queue_name,
                 "maxWaitTimeSeconds": self._config.max_wait_time_seconds,
+                "batchSize": self._config.batch_size,
+                "messageTimeoutSeconds": self._config.message_timeout_seconds,
             },
         )
 
@@ -84,7 +133,7 @@ class ServiceBusConsumer:
 
             while is_running():
                 messages = receiver.receive_messages(
-                    max_message_count=1,
+                    max_message_count=self._config.batch_size,
                     max_wait_time=self._config.max_wait_time_seconds,
                 )
 
@@ -92,53 +141,111 @@ class ServiceBusConsumer:
                     logger.debug("No messages received, continuing...")
                     continue
 
-                message = messages[0]
+                # -- Batch bookkeeping ----------------------------------
+                batch_id = str(uuid.uuid4())
+                batch_size = len(messages)
+                batch_start = time.monotonic()
 
-                try:
-                    # Extract body
-                    body = str(message)
+                logger.info(
+                    "batch_start",
+                    extra={
+                        "batchId": batch_id,
+                        "batchSize": batch_size,
+                    },
+                )
 
-                    # Process
-                    result = handle_message(body)
+                # -- Process each message sequentially ------------------
+                for index, message in enumerate(messages):
+                    msg_correlation_id = str(uuid.uuid4())
 
-                    if result.success:
-                        # Both SKIP and REPROCESS → complete
-                        # (no side-effects in this minimal orchestrator)
-                        receiver.complete_message(message)
-                        logger.info(
-                            "Message completed",
-                            extra={
-                                "correlationId": result.correlation_id,
-                                "assetId": result.asset_id,
-                                "decision": result.decision,
-                            },
-                        )
-                    else:
-                        # Processing error → abandon (return to queue)
-                        receiver.abandon_message(message)
-                        logger.warning(
-                            "Message abandoned due to processing error",
-                            extra={
-                                "correlationId": result.correlation_id,
-                                "error": result.error,
-                            },
-                        )
-
-                except Exception as exc:
-                    # Unexpected error in the receive/complete flow
-                    logger.error(
-                        "Unexpected error handling message: %s",
-                        exc,
-                        exc_info=True,
+                    renewer = LockRenewer(
+                        receiver=receiver,
+                        message=message,
+                        interval_seconds=self._config.lock_renew_interval_seconds,
+                        correlation_id=msg_correlation_id,
                     )
+                    renewer.start()
+
                     try:
-                        receiver.abandon_message(message)
-                    except Exception as abandon_exc:
-                        logger.error(
-                            "Failed to abandon message: %s",
-                            abandon_exc,
-                            exc_info=True,
+                        body = str(message)
+
+                        result, timed_out = self._process_with_timeout(
+                            body, self._config.message_timeout_seconds,
                         )
+
+                        if timed_out:
+                            receiver.abandon_message(message)
+                            logger.warning(
+                                "Message abandoned due to processing timeout",
+                                extra={
+                                    "correlationId": msg_correlation_id,
+                                    "batchId": batch_id,
+                                    "messageIndex": index,
+                                    "timeoutSeconds": self._config.message_timeout_seconds,
+                                },
+                            )
+                            continue
+
+                        if result.success:
+                            receiver.complete_message(message)
+                            logger.info(
+                                "Message completed",
+                                extra={
+                                    "correlationId": result.correlation_id,
+                                    "batchId": batch_id,
+                                    "messageIndex": index,
+                                    "assetId": result.asset_id,
+                                    "decision": result.decision,
+                                },
+                            )
+                        else:
+                            receiver.abandon_message(message)
+                            logger.warning(
+                                "Message abandoned due to processing error",
+                                extra={
+                                    "correlationId": result.correlation_id,
+                                    "batchId": batch_id,
+                                    "messageIndex": index,
+                                    "error": result.error,
+                                },
+                            )
+
+                    except Exception as exc:
+                        logger.error(
+                            "Unexpected error handling message: %s",
+                            exc,
+                            exc_info=True,
+                            extra={
+                                "correlationId": msg_correlation_id,
+                                "batchId": batch_id,
+                                "messageIndex": index,
+                            },
+                        )
+                        try:
+                            receiver.abandon_message(message)
+                        except Exception as abandon_exc:
+                            logger.error(
+                                "Failed to abandon message: %s",
+                                abandon_exc,
+                                exc_info=True,
+                                extra={
+                                    "correlationId": msg_correlation_id,
+                                    "batchId": batch_id,
+                                },
+                            )
+                    finally:
+                        renewer.stop()
+
+                # -- Batch complete -------------------------------------
+                batch_duration = time.monotonic() - batch_start
+                logger.info(
+                    "batch_end",
+                    extra={
+                        "batchId": batch_id,
+                        "batchSize": batch_size,
+                        "batchDurationSeconds": round(batch_duration, 3),
+                    },
+                )
 
         logger.info("Consumer stopped")
 
