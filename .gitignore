@@ -123,3 +123,4 @@ site/
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
+.claude/settings.local.json
