@@ -1013,15 +1013,16 @@ class TestCorrelationIdPropagation:
         context = pipeline.retrieve_context("test", reference_time=ref_time)
         assert "correlation_id" not in context.search_metadata
 
-    def test_correlation_id_passed_to_search_client(self):
-        """correlation_id is forwarded to the search client."""
+    def test_correlation_id_not_passed_to_search_client(self):
+        """correlation_id is used for logging/metadata only, not passed to search()."""
         pipeline, mock_client = self._make_pipeline_with_mock()
 
         pipeline.retrieve_context(
             query="test", correlation_id="corr-xyz"
         )
         call_kwargs = mock_client.search.call_args.kwargs
-        assert call_kwargs["correlation_id"] == "corr-xyz"
+        # search() does not accept correlation_id — it must not be forwarded
+        assert "correlation_id" not in call_kwargs
 
 
 # =============================================================================

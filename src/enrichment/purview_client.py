@@ -91,15 +91,14 @@ class PurviewClient:
     ) -> Dict[str, Any]:
         """
         Write the userDescription (Suggested Description) attribute on a
-        Purview entity using the Atlas Entity CreateOrUpdate API.
+        Purview entity using the current Datamap Atlas API.
 
-        This performs a PUT to:
-            /catalog/api/atlas/v2/entity
+        This performs a POST to:
+            /datamap/api/atlas/v2/entity?api-version=2023-09-01
 
-        The payload contains ONLY the entity GUID and the single attribute
-        being updated (userDescription). The Atlas API performs a partial
-        update — only attributes present in the payload are modified.
-        No other attributes are affected.
+        The entity is read first to obtain the mandatory typeName, name, and
+        qualifiedName required by the 2023-09-01 API contract. Only
+        userDescription is changed; all other attributes are left untouched.
 
         Args:
             entity_guid: The GUID of the Purview entity to update.
@@ -111,15 +110,28 @@ class PurviewClient:
         Raises:
             requests.HTTPError: If the API call fails.
         """
-        url = f"{self._base_url}/catalog/api/atlas/v2/entity"
+        # Fetch current entity to resolve mandatory identity attributes.
+        entity_data = self.get_entity(entity_guid)
+        entity = entity_data.get("entity", {})
+        type_name = entity.get("typeName", "")
+        attrs = entity.get("attributes", {})
+        name = attrs.get("name", "")
+        qualified_name = attrs.get("qualifiedName", "")
 
-        # Atlas CreateOrUpdate with minimal body — only userDescription is set.
-        # The API performs a partial update; attributes NOT in the payload
-        # are left untouched. This guarantees no accidental overwrites.
+        url = (
+            f"{self._base_url}/datamap/api/atlas/v2/entity"
+            "?api-version=2023-09-01"
+        )
+
+        # Datamap API (2023-09-01) requires typeName + mandatory attributes.
+        # Only userDescription is changed; remaining attributes are untouched.
         payload: Dict[str, Any] = {
             "entity": {
                 "guid": entity_guid,
+                "typeName": type_name,
                 "attributes": {
+                    "qualifiedName": qualified_name,
+                    "name": name,
                     "userDescription": description,
                 },
             },
@@ -129,13 +141,14 @@ class PurviewClient:
             "Writing Suggested Description to Purview",
             extra={
                 "entityGuid": entity_guid,
+                "typeName": type_name,
                 "descriptionLength": len(description),
                 "purviewAccount": self._account_name,
             },
         )
 
         headers = self._get_auth_headers()
-        response = self._session.put(url, json=payload, headers=headers)
+        response = self._session.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
         result = response.json()
@@ -163,7 +176,10 @@ class PurviewClient:
         Raises:
             requests.HTTPError: If the API call fails.
         """
-        url = f"{self._base_url}/catalog/api/atlas/v2/entity/guid/{entity_guid}"
+        url = (
+            f"{self._base_url}/datamap/api/atlas/v2/entity/guid/{entity_guid}"
+            "?api-version=2023-09-01"
+        )
 
         logger.info(
             "Reading entity from Purview",

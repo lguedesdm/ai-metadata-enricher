@@ -221,7 +221,6 @@ class RAGQueryPipeline:
         raw_chunks = self._search_client.search(
             query=query,
             filters=odata_filter,
-            correlation_id=correlation_id,
         )
 
         total_found = len(raw_chunks)
