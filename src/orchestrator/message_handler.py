@@ -7,15 +7,18 @@ Processes a single Service Bus message by:
 3. Computing the asset hash
 4. Reading previous state from Cosmos DB (via Managed Identity)
 5. Calling the domain-level decision logic (SKIP / REPROCESS)
-6. Writing state and audit records to Cosmos DB
-7. Logging the result with correlationId
+6. On SKIP  — writing state and audit records to Cosmos DB
+7. On REPROCESS — invoking the enrichment pipeline (RAG → LLM →
+   Validation → Purview Writeback → State Update → Audit)
+8. Logging the result with correlationId
 
 Cosmos DB access uses Managed Identity exclusively — no keys or secrets.
 
-This handler does NOT:
-- Call any LLM or AI service
-- Write to Purview or AI Search
-- Generate embeddings or prompts
+Pipeline integration contract:
+- The orchestrator does NOT contain enrichment logic.
+- Enrichment logic lives exclusively in src/enrichment/pipeline/.
+- State is updated only after successful Purview writeback (REPROCESS path).
+- On SKIP the state is confirmed immediately (no writeback needed).
 """
 
 import json
@@ -175,25 +178,57 @@ def handle_message(
             },
         )
 
-        # -- Write state and audit to Cosmos DB (if available) -------------
+        # -- Branch on decision -------------------------------------------
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if decision == DecisionResult.SKIP:
+            # SKIP: asset unchanged — write state confirmation + audit.
+            # No enrichment pipeline invocation.
+            if state_store is not None:
+                state_store.upsert_state({
+                    "id": asset_id,
+                    "entityType": entity_type,
+                    "sourceSystem": source_system,
+                    "contentHash": current_hash,
+                    "decision": decision.value,
+                    "correlationId": correlation_id,
+                    "updatedAt": now_iso,
+                })
+                audit_id = f"orch:{asset_id}:{correlation_id}"
+                state_store.upsert_audit({
+                    "id": audit_id,
+                    "entityType": entity_type,
+                    "assetId": asset_id,
+                    "sourceSystem": source_system,
+                    "decision": decision.value,
+                    "contentHash": current_hash,
+                    "correlationId": correlation_id,
+                    "processedAt": now_iso,
+                    "recordType": "orchestrator_decision",
+                })
+                logger.info(
+                    "SKIP — state and audit written to Cosmos DB",
+                    extra={
+                        "correlationId": correlation_id,
+                        "assetId": asset_id,
+                        "authMethod": "ManagedIdentity",
+                    },
+                )
+
+            return MessageProcessingResult(
+                correlation_id=correlation_id,
+                asset_id=asset_id,
+                decision=decision.value,
+                success=True,
+            )
+
+        # REPROCESS: asset new or changed — invoke enrichment pipeline.
+        # Write orchestrator decision audit before handing off.
+        # State is written by the pipeline AFTER successful Purview writeback.
         if state_store is not None:
-            now_iso = datetime.now(timezone.utc).isoformat()
-
-            # Upsert state record
-            state_store.upsert_state({
-                "id": asset_id,
-                "entityType": entity_type,
-                "sourceSystem": source_system,
-                "contentHash": current_hash,
-                "decision": decision.value,
-                "correlationId": correlation_id,
-                "updatedAt": now_iso,
-            })
-
-            # Write audit record
-            audit_id = f"{asset_id}:{correlation_id}"
+            orch_audit_id = f"orch:{asset_id}:{correlation_id}"
             state_store.upsert_audit({
-                "id": audit_id,
+                "id": orch_audit_id,
                 "entityType": entity_type,
                 "assetId": asset_id,
                 "sourceSystem": source_system,
@@ -201,22 +236,51 @@ def handle_message(
                 "contentHash": current_hash,
                 "correlationId": correlation_id,
                 "processedAt": now_iso,
+                "recordType": "orchestrator_decision",
             })
 
-            logger.info(
-                "State and audit written to Cosmos DB",
-                extra={
-                    "correlationId": correlation_id,
-                    "assetId": asset_id,
-                    "authMethod": "ManagedIdentity",
-                },
-            )
+        logger.info(
+            "REPROCESS — invoking enrichment pipeline",
+            extra={
+                "correlationId": correlation_id,
+                "assetId": asset_id,
+                "entityType": entity_type,
+                "sourceSystem": source_system,
+            },
+        )
+
+        from src.enrichment.pipeline.enrichment_pipeline import (  # noqa: PLC0415
+            run_enrichment_pipeline,
+        )
+
+        pipeline_result = run_enrichment_pipeline(
+            asset=asset,
+            asset_id=asset_id,
+            entity_type=entity_type,
+            source_system=source_system,
+            element_name=asset.get("entityName", asset_id),
+            correlation_id=correlation_id,
+            current_hash=current_hash,
+            state_store=state_store,
+        )
+
+        logger.info(
+            "Enrichment pipeline returned",
+            extra={
+                "correlationId": correlation_id,
+                "assetId": asset_id,
+                "pipelineSuccess": pipeline_result.success,
+                "validationStatus": pipeline_result.validation_status,
+                "writebackSuccess": pipeline_result.writeback_success,
+            },
+        )
 
         return MessageProcessingResult(
             correlation_id=correlation_id,
             asset_id=asset_id,
             decision=decision.value,
-            success=True,
+            success=pipeline_result.success,
+            error=pipeline_result.error,
         )
 
     except Exception as exc:

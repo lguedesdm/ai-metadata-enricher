@@ -179,6 +179,30 @@ class CosmosStateStore:
         return result
 
     # ------------------------------------------------------------------
+    # Container Accessors (infrastructure layer — for enrichment layer use)
+    # ------------------------------------------------------------------
+
+    @property
+    def state_container(self) -> ContainerProxy:
+        """The Cosmos DB container proxy for state records.
+
+        Exposed as a public property so the enrichment layer can construct
+        its own LifecycleStore without crossing the dependency boundary.
+        The enrichment layer must NOT import from the orchestrator layer;
+        it receives this infrastructure-layer object directly.
+        """
+        return self._state_container
+
+    @property
+    def audit_container(self) -> ContainerProxy:
+        """The Cosmos DB container proxy for audit records.
+
+        Exposed as a public property so the enrichment layer can construct
+        its own LifecycleStore without crossing the dependency boundary.
+        """
+        return self._audit_container
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 

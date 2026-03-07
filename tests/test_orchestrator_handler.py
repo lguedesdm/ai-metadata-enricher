@@ -11,9 +11,23 @@ These tests verify that the handler:
 
 import json
 import uuid
+from unittest.mock import MagicMock, patch
 
 from src.domain.change_detection import DecisionResult
 from src.orchestrator.message_handler import MessageProcessingResult, handle_message
+from src.enrichment.pipeline.enrichment_pipeline import EnrichmentPipelineResult
+
+# Reusable mock pipeline result for REPROCESS tests that verify handler-level
+# behavior (decision logic, payload parsing) rather than enrichment behavior.
+_MOCK_PIPELINE_SUCCESS = EnrichmentPipelineResult(
+    success=True,
+    asset_id="synergy.student.enrollment.table",
+    correlation_id="mock-correlation-id",
+    validation_status="PASS",
+    writeback_success=True,
+)
+
+_PIPELINE_PATCH = "src.enrichment.pipeline.enrichment_pipeline.run_enrichment_pipeline"
 
 
 # ---- Sample payloads -------------------------------------------------------
@@ -53,7 +67,8 @@ class TestHandleMessage:
     def test_valid_asset_returns_reprocess(self) -> None:
         """Valid asset with no previous state should return REPROCESS."""
         body = json.dumps(VALID_ASSET)
-        result = handle_message(body)
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            result = handle_message(body)
 
         assert isinstance(result, MessageProcessingResult)
         assert result.success is True
@@ -64,7 +79,15 @@ class TestHandleMessage:
     def test_minimal_asset_returns_reprocess(self) -> None:
         """Minimal asset should also return REPROCESS (no previous state)."""
         body = json.dumps(MINIMAL_ASSET)
-        result = handle_message(body)
+        mock_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="test.minimal",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+        with patch(_PIPELINE_PATCH, return_value=mock_result):
+            result = handle_message(body)
 
         assert result.success is True
         assert result.decision == "REPROCESS"
@@ -90,7 +113,8 @@ class TestHandleMessage:
     def test_bytes_body(self) -> None:
         """Handler should accept bytes as message body."""
         body = json.dumps(VALID_ASSET).encode("utf-8")
-        result = handle_message(body)
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            result = handle_message(body)
 
         assert result.success is True
         assert result.decision == "REPROCESS"
@@ -129,7 +153,15 @@ class TestHandleMessage:
             "lastUpdated": "2026-01-01T00:00:00Z",
             "schemaVersion": "1.0.0",
         }
-        result = handle_message(json.dumps(asset_no_id))
+        mock_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="unknown",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+        with patch(_PIPELINE_PATCH, return_value=mock_result):
+            result = handle_message(json.dumps(asset_no_id))
 
         assert result.success is True
         assert result.asset_id == "unknown"
@@ -141,13 +173,14 @@ class TestCosmosReadFallback:
 
     def test_cosmos_read_failure_returns_reprocess(self) -> None:
         """When state_store.get_state() raises, handler must return REPROCESS — not fail."""
-        from unittest.mock import MagicMock
-
         mock_store = MagicMock()
         mock_store.get_state.side_effect = RuntimeError("Cosmos 503 Service Unavailable")
+        mock_store.upsert_audit.return_value = None
+        # run_enrichment_pipeline is patched — lifecycle store is never built
 
         body = json.dumps(VALID_ASSET)
-        result = handle_message(body, state_store=mock_store)
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            result = handle_message(body, state_store=mock_store)
 
         assert result.success is True
         assert result.decision == "REPROCESS"
@@ -156,33 +189,39 @@ class TestCosmosReadFallback:
 
     def test_cosmos_read_timeout_returns_reprocess(self) -> None:
         """Timeout during Cosmos read should also produce REPROCESS."""
-        from unittest.mock import MagicMock
-
         mock_store = MagicMock()
         mock_store.get_state.side_effect = TimeoutError("Cosmos request timed out")
+        mock_store.upsert_audit.return_value = None
+        # run_enrichment_pipeline is patched — lifecycle store is never built
 
         body = json.dumps(VALID_ASSET)
-        result = handle_message(body, state_store=mock_store)
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            result = handle_message(body, state_store=mock_store)
 
         assert result.success is True
         assert result.decision == "REPROCESS"
 
-    def test_cosmos_read_failure_still_writes_state(self) -> None:
-        """After read failure fallback, handler should still attempt state+audit writes."""
-        from unittest.mock import MagicMock
+    def test_cosmos_read_failure_still_writes_audit(self) -> None:
+        """After read failure fallback, handler must write the orchestrator decision
+        audit record before delegating to the enrichment pipeline.
 
+        Note: In the integrated pipeline, the handler writes AUDIT (not state)
+        for REPROCESS decisions. State is written by the pipeline after
+        successful Purview writeback — enforcing the architectural invariant
+        that state is only updated after successful writeback.
+        """
         mock_store = MagicMock()
         mock_store.get_state.side_effect = ConnectionError("Transient failure")
-        # upsert methods should succeed
-        mock_store.upsert_state.return_value = None
         mock_store.upsert_audit.return_value = None
+        # run_enrichment_pipeline is patched — lifecycle store is never built
 
         body = json.dumps(VALID_ASSET)
-        result = handle_message(body, state_store=mock_store)
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            result = handle_message(body, state_store=mock_store)
 
         assert result.success is True
         assert result.decision == "REPROCESS"
-        mock_store.upsert_state.assert_called_once()
+        # Handler writes the orchestrator decision audit before calling pipeline
         mock_store.upsert_audit.assert_called_once()
 
 
@@ -193,15 +232,25 @@ class TestHandleMessageDeterminism:
         """Same asset payload should always produce the same decision."""
         body = json.dumps(VALID_ASSET)
 
-        results = [handle_message(body) for _ in range(5)]
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            results = [handle_message(body) for _ in range(5)]
 
         decisions = {r.decision for r in results}
         assert decisions == {"REPROCESS"}  # All REPROCESS (no previous state)
 
     def test_different_assets_both_reprocess(self) -> None:
         """Different assets should both be REPROCESS (no previous state)."""
-        result1 = handle_message(json.dumps(VALID_ASSET))
-        result2 = handle_message(json.dumps(MINIMAL_ASSET))
+        minimal_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="test.minimal",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+        with patch(_PIPELINE_PATCH, return_value=_MOCK_PIPELINE_SUCCESS):
+            result1 = handle_message(json.dumps(VALID_ASSET))
+        with patch(_PIPELINE_PATCH, return_value=minimal_result):
+            result2 = handle_message(json.dumps(MINIMAL_ASSET))
 
         assert result1.decision == "REPROCESS"
         assert result2.decision == "REPROCESS"
