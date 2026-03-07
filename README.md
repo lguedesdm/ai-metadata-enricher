@@ -18,6 +18,7 @@ The AI Metadata Enricher is a production-grade, event-driven platform designed f
 
 ```
 ai-metadata-enricher/
+├── architecture/       # Canonical architecture, guardrails, contract, execution plan
 ├── contracts/          # API contracts, schemas, and design-time definitions
 ├── infrastructure/     # Infrastructure as Code (Bicep)
 ├── docs/              # Architecture, governance, and technical documentation
@@ -32,6 +33,23 @@ ai-metadata-enricher/
 - [Governance and Compliance](docs/governance.md)
 - [Architecture Decision Records](docs/adr/)
 - [Contributing Guidelines](CONTRIBUTING.md)
+
+## Architecture Governance
+
+All contributors — human and automated — must follow the architecture documents before proposing or implementing changes.
+
+| Document | Purpose |
+|---|---|
+| [Architecture](architecture/architecture.md) | Canonical system design, data flow, and component inventory |
+| [Execution Plan](architecture/execution_plan.md) | Phased delivery milestones and completion criteria |
+| [Architecture Guardrails](architecture/architecture_guardrails.md) | Immutable engineering constraints |
+| [Architecture Contract](architecture/architecture_contract.md) | Prohibited changes, decision hierarchy, and agent compliance |
+
+**Rules:**
+- Architectural changes require explicit written approval from the project owner.
+- The guardrails file defines immutable constraints that cannot be overridden.
+- Frozen contracts and schemas must not be modified without an ADR and owner approval.
+- Automated agents must load `/architecture/` documents before performing any modification.
 
 ## Getting Started
 
