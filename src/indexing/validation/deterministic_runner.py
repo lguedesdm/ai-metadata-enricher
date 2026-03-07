@@ -206,7 +206,7 @@ class DeterministicRunner:
             content_hash = compute_element_hash(element)
 
             # Stage 4: State Comparison
-            entity_type = element_id.split("::")[1]
+            entity_type = element.element_type
             stored_hash = self.state_store.get_stored_hash(
                 element_id, entity_type
             )

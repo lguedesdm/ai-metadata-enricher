@@ -40,7 +40,7 @@ from src.infrastructure.state_store.models import STATE_RECORD_FIELDS
 # Helpers
 # ---------------------------------------------------------------------------
 
-ELEMENT_ID = "synergy::table::student enrollment"
+ELEMENT_ID = "U3R1ZGVudCBFbnJvbGxtZW50"  # base64("Student Enrollment")
 CONTENT_HASH = "a" * 64
 SOURCE_SYSTEM = "synergy"
 
@@ -121,12 +121,13 @@ class TestRecordStructure:
         assert record["sourceSystem"] == SOURCE_SYSTEM
 
     def test_record_has_entity_type(self):
+        """entityType is empty string — type cannot be parsed from base64 IDs."""
         store = _mock_state_store()
         update_element_state(
             ELEMENT_ID, CONTENT_HASH, SOURCE_SYSTEM, state_store=store
         )
         record = store.upsert_state.call_args[0][0]
-        assert record["entityType"] == "table"
+        assert record["entityType"] == ""
 
     def test_record_has_last_processed(self):
         store = _mock_state_store()
@@ -162,39 +163,34 @@ class TestRecordStructure:
 
 
 class TestEntityTypeExtraction:
-    """Entity type must be correctly parsed from element ID."""
+    """With base64 IDs, _extract_entity_type returns empty string."""
 
-    def test_extracts_table(self):
-        assert _extract_entity_type("synergy::table::students") == "table"
+    def test_returns_empty_for_base64_id(self):
+        assert _extract_entity_type("U3R1ZGVudCBFbnJvbGxtZW50") == ""
 
-    def test_extracts_column(self):
-        assert _extract_entity_type("zipline::column::age") == "column"
+    def test_returns_empty_for_legacy_format(self):
+        # Even old-format IDs now return empty (function deprecated)
+        assert _extract_entity_type("synergy::table::students") == ""
 
-    def test_extracts_view(self):
-        assert _extract_entity_type("synergy::view::enrollment summary") == "view"
+    def test_empty_id_raises(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            _extract_entity_type("")
 
-    def test_single_separator_extracts(self):
-        # "source::type" with no name part — still valid
-        assert _extract_entity_type("synergy::table") == "table"
-
-    def test_missing_separator_raises(self):
-        with pytest.raises(ValueError, match="Cannot extract entity type"):
-            _extract_entity_type("no-separators")
-
-    def test_empty_entity_type_raises(self):
-        with pytest.raises(ValueError, match="Cannot extract entity type"):
-            _extract_entity_type("synergy::  ::name")
+    def test_whitespace_id_raises(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            _extract_entity_type("   ")
 
     def test_entity_type_used_in_record(self):
+        """entityType in state record is empty with base64 IDs."""
         store = _mock_state_store()
         update_element_state(
-            "zipline::column::student_age",
+            "U3R1ZGVudCBFbnJvbGxtZW50",
             CONTENT_HASH,
             "zipline",
             state_store=store,
         )
         record = store.upsert_state.call_args[0][0]
-        assert record["entityType"] == "column"
+        assert record["entityType"] == ""
 
 
 # ===================================================================
@@ -301,10 +297,11 @@ class TestInputValidation:
             update_element_state(ELEMENT_ID, CONTENT_HASH, "", state_store=store)
 
     def test_invalid_element_id_format_raises_value_error(self):
+        """Empty element ID should still raise."""
         store = _mock_state_store()
-        with pytest.raises(ValueError, match="Cannot extract entity type"):
+        with pytest.raises(ValueError, match="element_id"):
             update_element_state(
-                "no-separators", CONTENT_HASH, SOURCE_SYSTEM, state_store=store
+                "", CONTENT_HASH, SOURCE_SYSTEM, state_store=store
             )
 
 
@@ -601,14 +598,15 @@ class TestRecordFieldValidation:
         assert ts.tzinfo is not None
 
     def test_different_element_produces_different_entity_type(self):
+        """entityType is always empty with base64 IDs."""
         store = _mock_state_store()
         update_element_state(
-            "zipline::column::student_age",
+            "U3R1ZGVudCBFbnJvbGxtZW50",
             CONTENT_HASH,
             "zipline",
             state_store=store,
         )
         record = store.upsert_state.call_args[0][0]
-        assert record["entityType"] == "column"
+        assert record["entityType"] == ""
         assert record["sourceSystem"] == "zipline"
-        assert record["id"] == "zipline::column::student_age"
+        assert record["id"] == "U3R1ZGVudCBFbnJvbGxtZW50"

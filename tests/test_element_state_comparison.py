@@ -319,9 +319,10 @@ class TestEdgeCases:
             result = compare_element_state(elem, stored_hash=upper_hash)
             assert result.decision == DecisionResult.REPROCESS
 
-    def test_different_source_systems_produce_different_ids(self):
+    def test_different_source_systems_same_name_produce_same_ids(self):
+        """ID depends only on element_name, not source_system."""
         elem_syn = _make_element(source_system="synergy")
         elem_zip = _make_element(source_system="zipline")
         result_syn = compare_element_state(elem_syn, stored_hash=None)
         result_zip = compare_element_state(elem_zip, stored_hash=None)
-        assert result_syn.element_id != result_zip.element_id
+        assert result_syn.element_id == result_zip.element_id

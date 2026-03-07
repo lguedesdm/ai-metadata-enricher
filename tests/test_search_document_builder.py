@@ -7,19 +7,23 @@ Test categories
 1. **One-to-one mapping** — one ``ContextElement`` → exactly one document.
 2. **Deterministic replay** — 100 identical calls → identical output.
 3. **Identity preservation** — ``document["id"] == element_id``.
-4. **Schema compliance** — document keys ⊆ ``SCHEMA_FIELDS``.
-6. **Traceability** — ``blobPath`` and ``originalSourceFile`` populated.
-7. **Content construction** — ``content`` follows the template structure.
-8. **Content truncation** — long content truncated to MAX_CONTENT_LENGTH.
-9. **Optional field handling** — missing fields → ``None``.
-10. **Immutability** — builder does not mutate the input element.
-11. **No runtime values** — no timestamps, no random IDs.
-12. **Schema validation gate** — extra fields trigger ``ValueError``.
-13. **Architecture isolation** — no Azure SDK imports in the module.
+4. **Schema compliance** — document keys ⊆ ``SCHEMA_FIELDS`` (13 fields).
+5. **Content construction** — ``content`` follows the template structure.
+6. **Content truncation** — long content truncated to MAX_CONTENT_LENGTH.
+7. **Optional field handling** — missing fields → ``None``.
+8. **Immutability** — builder does not mutate the input element.
+9. **No runtime values** — no timestamps, no random IDs.
+10. **Schema validation gate** — extra fields trigger ``ValueError``.
+11. **Architecture isolation** — no Azure SDK imports in the module.
+12. **Field mapping verification** — each deployed index field maps correctly.
+13. **Integration with upstream modules** — builder + identity in concert.
+14. **sourceSystem normalisation** — output is always lowercase.
+15. **Backward-compatible payload mapping** — old field names still work.
 """
 
 from __future__ import annotations
 
+import base64
 import copy
 
 import pytest
@@ -30,12 +34,11 @@ from src.domain.search_document import (
     build_search_document,
     MAX_CONTENT_LENGTH,
     SCHEMA_FIELDS,
-    SCHEMA_VERSION,
 )
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _make_element(
@@ -51,22 +54,15 @@ def _make_element(
         raw_payload = {
             "id": "synergy.student.enrollment.table",
             "sourceSystem": source_system,
-            "entityType": element_type,
-            "entityName": element_name,
-            "entityPath": "synergy.student.enrollment",
+            "elementType": element_type,
+            "elementName": element_name,
+            "source": "synergy-export-2026-03-01.json",
             "description": description,
             "businessMeaning": "Core enrollment information for all students.",
-            "domain": "Student Information",
             "tags": ["enrollment", "student", "core"],
             "content": "Student Enrollment table in Synergy SIS.",
             "lastUpdated": "2026-01-12T10:00:00Z",
-            "schemaVersion": "1.0.0",
-            "dataType": None,
-            "sourceTable": None,
-            "cedsReference": None,
-            "lineage": ["synergy.student.table"],
-            "blobPath": "exports/synergy/synergy-export-2026-03-01.json",
-            "originalSourceFile": "synergy-export-2026-03-01.json",
+            "cedsReference": "https://ceds.ed.gov/element/000123",
         }
     return ContextElement(
         source_system=source_system,
@@ -87,12 +83,11 @@ def _make_minimal_element() -> ContextElement:
         raw_payload={
             "id": "zipline.assessment.definition.element",
             "sourceSystem": "zipline",
-            "entityType": "element",
-            "entityName": "Assessment Definition",
+            "elementType": "element",
+            "elementName": "Assessment Definition",
             "description": "Canonical definition of an assessment.",
             "content": "Assessment definition content.",
             "lastUpdated": "2026-02-01T08:00:00Z",
-            "schemaVersion": "1.0.0",
         },
     )
 
@@ -102,6 +97,11 @@ def _build(element: ContextElement | None = None) -> dict:
     elem = element or _make_element()
     eid = generate_element_id(elem)
     return build_search_document(elem, eid)
+
+
+def _expected_b64(value: str) -> str:
+    """Return the expected base64 ID for a given element name."""
+    return base64.b64encode(value.encode("utf-8")).decode("ascii")
 
 
 # ===================================================================
@@ -156,11 +156,10 @@ class TestIdentityPreservation:
         doc = build_search_document(elem, eid)
         assert doc["id"] == eid
 
-    def test_id_matches_generate_element_id(self):
+    def test_id_is_base64_encoded(self):
         elem = _make_element()
-        expected_id = generate_element_id(elem)
         doc = _build(elem)
-        assert doc["id"] == expected_id
+        assert doc["id"] == _expected_b64("Student Enrollment")
 
     def test_id_stable_across_reindex(self):
         elem = _make_element()
@@ -171,11 +170,11 @@ class TestIdentityPreservation:
 
 
 # ===================================================================
-# 4. Schema compliance
+# 4. Schema compliance — 13 deployed fields
 # ===================================================================
 
 class TestSchemaCompliance:
-    """Document keys must be a subset of SCHEMA_FIELDS."""
+    """Document keys must be a subset of SCHEMA_FIELDS (13 fields)."""
 
     def test_all_keys_in_schema(self):
         doc = _build()
@@ -185,10 +184,8 @@ class TestSchemaCompliance:
         doc = _build()
         assert set(doc.keys()) == SCHEMA_FIELDS
 
-    def test_schema_version_is_v1_1(self):
-        doc = _build()
-        assert doc["schemaVersion"] == SCHEMA_VERSION
-        assert doc["schemaVersion"] == "1.1.0"
+    def test_schema_has_13_fields(self):
+        assert len(SCHEMA_FIELDS) == 13
 
     def test_content_vector_is_none(self):
         doc = _build()
@@ -196,40 +193,19 @@ class TestSchemaCompliance:
 
 
 # ===================================================================
-# 6. Traceability
-# ===================================================================
-
-class TestTraceability:
-    """blobPath and originalSourceFile must be populated when available."""
-
-    def test_blob_path_populated(self):
-        doc = _build()
-        assert doc["blobPath"] == "exports/synergy/synergy-export-2026-03-01.json"
-
-    def test_original_source_file_populated(self):
-        doc = _build()
-        assert doc["originalSourceFile"] == "synergy-export-2026-03-01.json"
-
-    def test_traceability_none_when_absent(self):
-        doc = _build(_make_minimal_element())
-        assert doc["blobPath"] is None
-        assert doc["originalSourceFile"] is None
-
-
-# ===================================================================
-# 7. Content construction
+# 5. Content construction
 # ===================================================================
 
 class TestContentConstruction:
     """The content field must follow the deterministic template."""
 
-    def test_content_contains_entity_type(self):
+    def test_content_contains_element_type(self):
         doc = _build()
-        assert "Entity Type: table" in doc["content"]
+        assert "Element Type: table" in doc["content"]
 
-    def test_content_contains_entity_name(self):
+    def test_content_contains_element_name(self):
         doc = _build()
-        assert "Entity Name: Student Enrollment" in doc["content"]
+        assert "Element Name: Student Enrollment" in doc["content"]
 
     def test_content_contains_source_system(self):
         doc = _build()
@@ -239,13 +215,9 @@ class TestContentConstruction:
         doc = _build()
         assert "Stores student enrollment records." in doc["content"]
 
-    def test_content_contains_business_meaning(self):
+    def test_content_contains_suggested_description(self):
         doc = _build()
         assert "Core enrollment information for all students." in doc["content"]
-
-    def test_content_contains_domain(self):
-        doc = _build()
-        assert "Student Information" in doc["content"]
 
     def test_content_contains_tags(self):
         doc = _build()
@@ -259,22 +231,26 @@ class TestContentConstruction:
         doc = _build()
         c = doc["content"]
         # Verify ordering of sections
-        assert c.index("Entity Type:") < c.index("Entity Name:")
-        assert c.index("Entity Name:") < c.index("Source System:")
+        assert c.index("Element Type:") < c.index("Element Name:")
+        assert c.index("Element Name:") < c.index("Source System:")
         assert c.index("Source System:") < c.index("Description:")
-        assert c.index("Description:") < c.index("Business Meaning:")
-        assert c.index("Business Meaning:") < c.index("Domain:")
-        assert c.index("Domain:") < c.index("Tags:")
+        assert c.index("Description:") < c.index("Suggested Description:")
+        assert c.index("Suggested Description:") < c.index("Tags:")
         assert c.index("Tags:") < c.index("Additional Content:")
+
+    def test_content_does_not_contain_domain_section(self):
+        """Domain section was removed from the deployed index."""
+        doc = _build()
+        assert "Domain:" not in doc["content"]
 
     def test_minimal_element_content_no_crash(self):
         doc = _build(_make_minimal_element())
-        assert "Entity Type: element" in doc["content"]
-        assert "Entity Name: Assessment Definition" in doc["content"]
+        assert "Element Type: element" in doc["content"]
+        assert "Element Name: Assessment Definition" in doc["content"]
 
 
 # ===================================================================
-# 8. Content truncation
+# 6. Content truncation
 # ===================================================================
 
 class TestContentTruncation:
@@ -292,14 +268,12 @@ class TestContentTruncation:
             element_type="table",
             description=long_desc,
             raw_payload={
-                "id": "synergy.big.table",
                 "sourceSystem": "synergy",
-                "entityType": "table",
-                "entityName": "Big Table",
+                "elementType": "table",
+                "elementName": "Big Table",
                 "description": long_desc,
                 "content": "x" * 2000,
                 "lastUpdated": "2026-01-01T00:00:00Z",
-                "schemaVersion": "1.0.0",
             },
         )
         doc = _build(elem)
@@ -313,14 +287,12 @@ class TestContentTruncation:
             element_type="table",
             description=long_desc,
             raw_payload={
-                "id": "synergy.big.table",
                 "sourceSystem": "synergy",
-                "entityType": "table",
-                "entityName": "Big Table",
+                "elementType": "table",
+                "elementName": "Big Table",
                 "description": long_desc,
                 "content": "y" * 2000,
                 "lastUpdated": "2026-01-01T00:00:00Z",
-                "schemaVersion": "1.0.0",
             },
         )
         results = {_build(elem)["content"] for _ in range(20)}
@@ -328,47 +300,31 @@ class TestContentTruncation:
 
 
 # ===================================================================
-# 9. Optional field handling
+# 7. Optional field handling
 # ===================================================================
 
 class TestOptionalFields:
     """Missing optional fields must default to None."""
 
-    def test_missing_business_meaning(self):
+    def test_missing_suggested_description(self):
         doc = _build(_make_minimal_element())
-        assert doc["businessMeaning"] is None
-
-    def test_missing_domain(self):
-        doc = _build(_make_minimal_element())
-        assert doc["domain"] is None
+        assert doc["suggestedDescription"] is None
 
     def test_missing_tags(self):
         doc = _build(_make_minimal_element())
         assert doc["tags"] is None
 
-    def test_missing_data_type(self):
+    def test_missing_ceds_link(self):
         doc = _build(_make_minimal_element())
-        assert doc["dataType"] is None
+        assert doc["cedsLink"] is None
 
-    def test_missing_source_table(self):
+    def test_missing_source(self):
         doc = _build(_make_minimal_element())
-        assert doc["sourceTable"] is None
-
-    def test_missing_ceds_reference(self):
-        doc = _build(_make_minimal_element())
-        assert doc["cedsReference"] is None
-
-    def test_missing_lineage(self):
-        doc = _build(_make_minimal_element())
-        assert doc["lineage"] is None
-
-    def test_missing_entity_path(self):
-        doc = _build(_make_minimal_element())
-        assert doc["entityPath"] is None
+        assert doc["source"] is None
 
 
 # ===================================================================
-# 10. Immutability
+# 8. Immutability
 # ===================================================================
 
 class TestImmutability:
@@ -395,36 +351,32 @@ class TestImmutability:
 
 
 # ===================================================================
-# 11. No runtime values
+# 9. No runtime values
 # ===================================================================
 
 class TestNoRuntimeValues:
     """Builder must not inject timestamps, UUIDs, or random values."""
 
-    def test_no_uuid_in_id(self):
+    def test_id_is_base64_not_uuid(self):
         doc = _build()
-        # ID must be the deterministic "{sys}::{type}::{name}" format
-        assert "::" in doc["id"]
-        assert "-" not in doc["id"] or "." in doc["id"]
+        # ID must be base64-encoded, not a UUID or separator-based
+        decoded = base64.b64decode(doc["id"]).decode("utf-8")
+        assert decoded == "Student Enrollment"
 
     def test_last_updated_from_payload_not_runtime(self):
         doc = _build()
         assert doc["lastUpdated"] == "2026-01-12T10:00:00Z"
 
-    def test_schema_version_is_constant(self):
-        results = {_build()["schemaVersion"] for _ in range(10)}
-        assert results == {"1.1.0"}
-
 
 # ===================================================================
-# 12. Schema validation gate
+# 10. Schema validation gate
 # ===================================================================
 
 class TestSchemaValidationGate:
     """Extra fields must trigger ValueError."""
 
     def test_schema_fields_count(self):
-        assert len(SCHEMA_FIELDS) == 19
+        assert len(SCHEMA_FIELDS) == 13
 
     def test_document_keys_match_schema(self):
         doc = _build()
@@ -432,7 +384,7 @@ class TestSchemaValidationGate:
 
 
 # ===================================================================
-# 13. Architecture isolation
+# 11. Architecture isolation
 # ===================================================================
 
 class TestArchitectureIsolation:
@@ -461,7 +413,7 @@ class TestArchitectureIsolation:
 
 
 # ===================================================================
-# 14. Field mapping verification
+# 12. Field mapping verification
 # ===================================================================
 
 class TestFieldMapping:
@@ -471,25 +423,38 @@ class TestFieldMapping:
         doc = _build()
         assert doc["sourceSystem"] == "synergy"
 
-    def test_entity_type_mapping(self):
+    def test_element_type_mapping(self):
         doc = _build()
-        assert doc["entityType"] == "table"
+        assert doc["elementType"] == "table"
 
-    def test_entity_name_mapping(self):
+    def test_element_name_mapping(self):
         doc = _build()
-        assert doc["entityName"] == "Student Enrollment"
+        assert doc["elementName"] == "Student Enrollment"
 
-    def test_entity_path_mapping(self):
+    def test_title_mapping(self):
+        """title defaults to element_name."""
         doc = _build()
-        assert doc["entityPath"] == "synergy.student.enrollment"
+        assert doc["title"] == "Student Enrollment"
 
     def test_description_mapping(self):
         doc = _build()
         assert doc["description"] == "Stores student enrollment records."
 
-    def test_lineage_mapping(self):
+    def test_suggested_description_from_business_meaning(self):
+        """Backward compat: businessMeaning → suggestedDescription."""
         doc = _build()
-        assert doc["lineage"] == ["synergy.student.table"]
+        assert doc["suggestedDescription"] == (
+            "Core enrollment information for all students."
+        )
+
+    def test_ceds_link_from_ceds_reference(self):
+        """Backward compat: cedsReference → cedsLink."""
+        doc = _build()
+        assert doc["cedsLink"] == "https://ceds.ed.gov/element/000123"
+
+    def test_source_mapping(self):
+        doc = _build()
+        assert doc["source"] == "synergy-export-2026-03-01.json"
 
     def test_last_updated_mapping(self):
         doc = _build()
@@ -499,23 +464,17 @@ class TestFieldMapping:
         doc = _build()
         assert doc["tags"] == ["enrollment", "student", "core"]
 
-    def test_domain_mapping(self):
+    def test_content_vector_is_none(self):
         doc = _build()
-        assert doc["domain"] == "Student Information"
-
-    def test_business_meaning_mapping(self):
-        doc = _build()
-        assert doc["businessMeaning"] == (
-            "Core enrollment information for all students."
-        )
+        assert doc["contentVector"] is None
 
 
 # ===================================================================
-# 15. Integration with upstream modules
+# 13. Integration with upstream modules
 # ===================================================================
 
 class TestUpstreamIntegration:
-    """Builder integrates with identity, hashing, and state modules."""
+    """Builder integrates with identity module."""
 
     def test_id_from_generate_element_id(self):
         elem = _make_element()
@@ -529,4 +488,95 @@ class TestUpstreamIntegration:
         doc_a = _build(elem_a)
         doc_b = _build(elem_b)
         assert doc_a["id"] != doc_b["id"]
-        assert doc_a["entityName"] != doc_b["entityName"]
+        assert doc_a["elementName"] != doc_b["elementName"]
+
+
+# ===================================================================
+# 14. sourceSystem normalisation
+# ===================================================================
+
+class TestSourceSystemNormalisation:
+    """sourceSystem in the output document must always be lowercase."""
+
+    def test_uppercase_normalised(self):
+        elem = _make_element(source_system="Synergy")
+        doc = _build(elem)
+        assert doc["sourceSystem"] == "synergy"
+
+    def test_mixed_case_normalised(self):
+        elem = _make_element(source_system="ZIPLINE")
+        doc = _build(elem)
+        assert doc["sourceSystem"] == "zipline"
+
+    def test_already_lowercase(self):
+        elem = _make_element(source_system="synergy")
+        doc = _build(elem)
+        assert doc["sourceSystem"] == "synergy"
+
+
+# ===================================================================
+# 15. Backward-compatible payload mapping
+# ===================================================================
+
+class TestBackwardCompatPayload:
+    """Builder must accept both old and new payload field names."""
+
+    def test_suggested_description_from_new_field(self):
+        """When payload has suggestedDescription directly, use it."""
+        elem = _make_element(raw_payload={
+            "sourceSystem": "synergy",
+            "elementType": "table",
+            "elementName": "Students",
+            "suggestedDescription": "New-style description.",
+            "description": "Desc.",
+            "content": "c",
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        })
+        doc = _build(elem)
+        assert doc["suggestedDescription"] == "New-style description."
+
+    def test_business_meaning_takes_precedence(self):
+        """When payload has both businessMeaning and suggestedDescription,
+        businessMeaning wins (backward compat)."""
+        elem = _make_element(raw_payload={
+            "sourceSystem": "synergy",
+            "elementType": "table",
+            "elementName": "Students",
+            "businessMeaning": "From old field.",
+            "suggestedDescription": "From new field.",
+            "description": "Desc.",
+            "content": "c",
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        })
+        doc = _build(elem)
+        assert doc["suggestedDescription"] == "From old field."
+
+    def test_ceds_link_from_new_field(self):
+        """When payload has cedsLink directly, use it."""
+        elem = _make_element(raw_payload={
+            "sourceSystem": "synergy",
+            "elementType": "table",
+            "elementName": "Students",
+            "cedsLink": "https://ceds.ed.gov/new",
+            "description": "Desc.",
+            "content": "c",
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        })
+        doc = _build(elem)
+        assert doc["cedsLink"] == "https://ceds.ed.gov/new"
+
+    def test_ceds_reference_takes_precedence(self):
+        """When payload has both cedsReference and cedsLink,
+        cedsReference wins (backward compat)."""
+        elem = _make_element(raw_payload={
+            "sourceSystem": "synergy",
+            "elementType": "table",
+            "elementName": "Students",
+            "cedsReference": "https://ceds.ed.gov/old",
+            "cedsLink": "https://ceds.ed.gov/new",
+            "description": "Desc.",
+            "content": "c",
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        })
+        doc = _build(elem)
+        assert doc["cedsLink"] == "https://ceds.ed.gov/old"

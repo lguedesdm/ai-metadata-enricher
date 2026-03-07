@@ -1,9 +1,12 @@
 """
 Schema-aligned constants for the Search Document Builder.
 
-Defines the **frozen** set of field names permitted in an Azure AI Search
-document (v1.1.0) and the deterministic content-template used to build the
-``content`` field.
+Defines the **authoritative** set of field names permitted in an Azure
+AI Search document, derived from the deployed index
+``metadata-context-index-v1``.
+
+The deployed index and its indexers are the source of truth.  The
+enrichment pipeline adapts to this contract.
 
 No field may be emitted by the builder unless it appears in
 ``SCHEMA_FIELDS``.  The validation gate in ``builder.py`` enforces this
@@ -13,16 +16,14 @@ Design constraints
 ==================
 
 - Constants only — no I/O, no Azure, no global mutable state.
-- ``SCHEMA_FIELDS`` is derived exclusively from the frozen index
-  design documented in ``docs/search-index-design.md`` and the
-  traceability fields added in ADR-0004 (v1.1.0).
+- ``SCHEMA_FIELDS`` is derived from the deployed index schema.
 """
 
 from __future__ import annotations
 
 # -----------------------------------------------------------------------
-# Frozen index schema v1.1.0 — authoritative field list
-# Source: docs/search-index-design.md + docs/adr/0004-…
+# Deployed index schema — authoritative field list
+# Source: deployed metadata-context-index-v1 on aime-dev-search
 # -----------------------------------------------------------------------
 
 SCHEMA_FIELDS: frozenset[str] = frozenset(
@@ -30,35 +31,25 @@ SCHEMA_FIELDS: frozenset[str] = frozenset(
         # Core identity
         "id",
         "sourceSystem",
-        "entityType",
-        "schemaVersion",
+        "source",
+        # Classification
+        "elementType",
+        "elementName",
         # Descriptive
-        "entityName",
-        "entityPath",
+        "title",
         "description",
-        "businessMeaning",
-        # Semantic enrichment
-        "domain",
-        "tags",
+        "suggestedDescription",
         # RAG-critical
         "content",
         "contentVector",
-        # Technical metadata
-        "dataType",
-        "sourceTable",
-        "cedsReference",
-        # Lineage and temporal
-        "lineage",
+        # Enrichment
+        "tags",
+        "cedsLink",
+        # Temporal
         "lastUpdated",
-        # Traceability (v1.1.0, ADR-0004)
-        "blobPath",
-        "originalSourceFile",
     }
 )
-"""All field names permitted in an Azure AI Search document (v1.1.0)."""
-
-SCHEMA_VERSION: str = "1.1.0"
-"""Current schema version stamped into every emitted document."""
+"""All field names permitted in an Azure AI Search document."""
 
 MAX_CONTENT_LENGTH: int = 5_000
 """Safe upper bound (characters) for the ``content`` field."""
@@ -68,18 +59,15 @@ MAX_CONTENT_LENGTH: int = 5_000
 # -----------------------------------------------------------------------
 
 CONTENT_TEMPLATE: str = (
-    "Entity Type: {entity_type}\n"
-    "Entity Name: {entity_name}\n"
+    "Element Type: {element_type}\n"
+    "Element Name: {element_name}\n"
     "Source System: {source_system}\n"
     "\n"
     "Description:\n"
     "{description}\n"
     "\n"
-    "Business Meaning:\n"
-    "{business_meaning}\n"
-    "\n"
-    "Domain:\n"
-    "{domain}\n"
+    "Suggested Description:\n"
+    "{suggested_description}\n"
     "\n"
     "Tags:\n"
     "{tags}\n"

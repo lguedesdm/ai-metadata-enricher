@@ -141,21 +141,21 @@ def _validate_inputs(
 def _extract_entity_type(element_id: str) -> str:
     """Extract the entity type component from a deterministic element ID.
 
-    Element IDs follow the format ``"{source}::{type}::{name}"``.
-    The entity type is the second ``"::"``-delimited component.
+    .. deprecated::
+        With base64-encoded IDs, entity type cannot be parsed from the
+        ID.  This function is retained for backward compatibility but
+        returns an empty string.  Callers that need entity type should
+        obtain it from the source ``ContextElement`` directly.
 
     Raises:
-        ValueError: If the element_id does not contain at least two
-            ``"::"``-separated components, or the type component is
-            empty.
+        ValueError: If the element_id is empty.
     """
-    parts = element_id.split("::")
-    if len(parts) < 2 or not parts[1].strip():
+    if not element_id or not element_id.strip():
         raise ValueError(
             f"Cannot extract entity type from element_id: {element_id!r}. "
-            f"Expected format: '{{source}}::{{type}}::{{name}}'"
+            f"Element ID must not be empty."
         )
-    return parts[1]
+    return ""
 
 
 def _validate_record_fields(record: Dict[str, Any]) -> None:

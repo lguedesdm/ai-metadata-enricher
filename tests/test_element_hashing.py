@@ -655,7 +655,7 @@ class TestElementHashResult:
         elem = _make_element()
         result = compute_element_hash_result(elem)
         assert isinstance(result, ElementHashResult)
-        assert "::" in result.element_id
+        assert len(result.element_id) > 0
         assert len(result.content_hash) == 64
 
     def test_result_hash_matches_standalone_hash(self):

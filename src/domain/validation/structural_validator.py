@@ -163,7 +163,7 @@ def validate_structural(yaml_text: str) -> ValidationResult:
     lines = [ln.rstrip("\r\n") for ln in yaml_text.splitlines() if ln.strip() != ""]
     seen_order: List[str] = []
     for ln in lines:
-        if ln.startswith(" ") or ":" not in ln:
+        if ln.startswith(" ") or ":" not in ln or ln.lstrip().startswith("- "):
             # Only consider top-level keys
             if ln.lstrip().startswith("- "):
                 continue

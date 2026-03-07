@@ -12,10 +12,11 @@ Public API:
 
 from .models import ContextElement
 from .splitter import split_elements
-from .element_identity import generate_element_id
+from .element_identity import generate_element_id, normalise_source_system
 
 __all__ = [
     "ContextElement",
     "split_elements",
     "generate_element_id",
+    "normalise_source_system",
 ]

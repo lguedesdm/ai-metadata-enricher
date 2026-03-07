@@ -2,111 +2,110 @@
 Deterministic identity generation for context elements.
 
 Produces stable, deterministic document IDs for ``ContextElement`` instances
-using a pure normalisation-and-concatenation approach.  The generated ID
-is used as the document key in Azure AI Search and as the identity anchor
-for incremental indexing.
+using base64 encoding of the element name.  The generated ID is used as the
+document key in Azure AI Search and as the identity anchor for incremental
+indexing.
 
 ID format::
 
-    "{source_system}::{element_type}::{element_name}"
+    base64Encode(element_name)
 
-Each segment is normalised identically:
-
-1. Strip leading / trailing whitespace.
-2. Collapse multiple internal spaces to a single space.
-3. Convert to lowercase.
-4. Reject if empty after normalisation (``ValueError``).
-5. Reject if the normalised value contains the reserved separator
-   ``"::"`` (``ValueError``) — prevents structural ambiguity.
+This matches the ID generation strategy used by the Azure AI Search
+indexers (synergy-elements-indexer, zipline-elements-indexer), ensuring
+that enrichment updates target existing indexed documents rather than
+creating duplicates.
 
 Design constraints:
     - Pure function — no I/O, no logging, no Azure, no global state.
     - Deterministic — same input always yields the same ID.
     - Idempotent — calling multiple times has no side effect.
     - No dependency on hashing, time, or external state.
+    - ID must match the base64Encode mapping function used by indexers.
 """
 
 from __future__ import annotations
 
-import re
+import base64
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.domain.element_splitter.models import ContextElement
 
-# Pre-compiled pattern: two or more whitespace characters.
-_MULTI_SPACE_RE = re.compile(r"\s+")
-
-# Reserved separator used to delimit identity segments.
-_SEPARATOR = "::"
+# Allowed sourceSystem values (lowercase-normalised).
+_ALLOWED_SOURCE_SYSTEMS: frozenset[str] = frozenset(
+    {"synergy", "zipline", "documentation"}
+)
 
 
 def generate_element_id(element: "ContextElement") -> str:
     """Return a stable, deterministic ID for *element*.
 
-    The ID is constructed from three normalised segments joined by
-    ``"::"``::
-
-        "{source_system}::{element_type}::{element_name}"
+    The ID is the base64 encoding of the ``element_name``,
+    matching the ``base64Encode`` mapping function used by Azure AI
+    Search indexers.
 
     Args:
-        element: A ``ContextElement`` whose identity fields will be
-            normalised and concatenated.
+        element: A ``ContextElement`` whose ``element_name`` will be
+            used to derive the document ID.
 
     Returns:
-        Lowercase, whitespace-collapsed, ``"::"``-delimited string.
+        Base64-encoded string suitable for use as an Azure AI Search
+        document key.
 
     Raises:
-        ValueError: If any identity field is empty or contains only
-            whitespace after normalisation, or if the normalised value
-            contains the reserved separator ``"::"``, or if the
-            final ID exceeds 1024 characters (Azure AI Search key limit).
-            The error message includes the original raw value for
-            diagnostics.
+        ValueError: If ``element_name`` is empty or contains only
+            whitespace, or if the encoded ID exceeds 1024 characters
+            (Azure AI Search key limit).
     """
-    source = _normalise_field(element.source_system, "source_system")
-    etype = _normalise_field(element.element_type, "element_type")
-    ename = _normalise_field(element.element_name, "element_name")
+    name = element.element_name
+    if not name or not name.strip():
+        raise ValueError(
+            f"Identity field 'element_name' is empty after normalisation "
+            f"(original value: {name!r})"
+        )
 
-    document_id = f"{source}::{etype}::{ename}"
+    document_id = _base64_encode(name)
 
     if len(document_id) > 1024:
         raise ValueError(
             f"Generated document ID exceeds Azure AI Search limit "
             f"(length={len(document_id)}, max=1024). "
-            f"Original values: source={element.source_system!r}, "
-            f"type={element.element_type!r}, "
-            f"name={element.element_name!r}"
+            f"Original element_name: {name!r}"
         )
 
     return document_id
 
 
-def _normalise_field(value: str, field_name: str) -> str:
-    """Normalise a single identity field.
+def normalise_source_system(value: str) -> str:
+    """Normalise a ``sourceSystem`` value to lowercase.
 
-    Steps:
-        1. Strip leading/trailing whitespace.
-        2. Collapse runs of internal whitespace to a single space.
-        3. Convert to lowercase.
-        4. Reject if result is empty.
-        5. Reject if result contains the reserved separator ``"::"``.
+    Ensures consistency across all enrichment documents.  Only the
+    allowed values ``synergy``, ``zipline``, and ``documentation``
+    are accepted.
+
+    Args:
+        value: Raw sourceSystem string (e.g. ``"Synergy"``, ``"ZIPLINE"``).
+
+    Returns:
+        Lowercase normalised string.
 
     Raises:
-        ValueError: With the original raw value in the message.
+        ValueError: If the normalised value is not in the allowed set.
     """
-    normalised = _MULTI_SPACE_RE.sub(" ", value.strip()).lower()
-
-    if not normalised:
+    normalised = value.strip().lower()
+    if normalised not in _ALLOWED_SOURCE_SYSTEMS:
         raise ValueError(
-            f"Identity field '{field_name}' is empty after normalisation "
-            f"(original value: {value!r})"
+            f"sourceSystem '{value}' normalises to '{normalised}' which "
+            f"is not in the allowed set: {sorted(_ALLOWED_SOURCE_SYSTEMS)}"
         )
-
-    if _SEPARATOR in normalised:
-        raise ValueError(
-            f"Identity field '{field_name}' contains reserved separator "
-            f"'{_SEPARATOR}' (original value: {value!r})"
-        )
-
     return normalised
+
+
+def _base64_encode(value: str) -> str:
+    """Encode *value* using the same base64 scheme as Azure AI Search.
+
+    Azure AI Search ``base64Encode`` uses standard base64 encoding
+    (RFC 4648) of the UTF-8 bytes, with ``+`` and ``/`` characters
+    and ``=`` padding.
+    """
+    return base64.b64encode(value.encode("utf-8")).decode("ascii")

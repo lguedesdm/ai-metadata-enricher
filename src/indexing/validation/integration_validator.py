@@ -62,7 +62,7 @@ class IntegrationValidator:
         unique_ids = set(ids)
 
         id_format_valid = all(
-            len(eid.split("::")) >= 3 for eid in ids
+            len(eid) > 0 for eid in ids
         )
 
         return {
@@ -233,18 +233,18 @@ class IntegrationValidator:
 
     @staticmethod
     def verify_schema_contract() -> Dict[str, Any]:
-        """Verify that the frozen schema fields are unchanged.
+        """Verify that the schema fields match the deployed index.
 
-        Checks the builder's SCHEMA_FIELDS against the expected v1.1.0
-        field list.  If schema drift is detected, returns passed=False.
+        Checks the builder's SCHEMA_FIELDS against the deployed
+        ``metadata-context-index-v1`` field list (13 fields).
+        If schema drift is detected, returns passed=False.
         """
         expected_fields = frozenset({
-            "id", "sourceSystem", "entityType", "schemaVersion",
-            "entityName", "entityPath", "description", "businessMeaning",
-            "domain", "tags", "content", "contentVector",
-            "dataType", "sourceTable", "cedsReference",
-            "lineage", "lastUpdated",
-            "blobPath", "originalSourceFile",
+            "id", "sourceSystem", "source",
+            "elementType", "elementName",
+            "title", "description", "suggestedDescription",
+            "content", "contentVector",
+            "tags", "cedsLink", "lastUpdated",
         })
 
         fields_match = SCHEMA_FIELDS == expected_fields

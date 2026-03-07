@@ -33,7 +33,7 @@ import pytest
 from src.domain.element_splitter import split_elements, generate_element_id
 from src.domain.element_hashing import compute_element_hash
 from src.domain.element_state import compare_element_state, StateDecision
-from src.domain.search_document.models import SCHEMA_FIELDS, SCHEMA_VERSION
+from src.domain.search_document.models import SCHEMA_FIELDS
 from src.indexing.validation.deterministic_runner import (
     DeterministicRunner,
     InMemoryStateStore,
@@ -151,16 +151,15 @@ class TestElementSplitIntegrity:
 class TestIdentityDeterminism:
     """Verify that element IDs are deterministic and correctly formatted."""
 
-    def test_id_format_source_type_name(self) -> None:
+    def test_id_format_base64(self) -> None:
         blob = _single_element_blob()
         runner = DeterministicRunner()
         result = runner.run(blob)
         eid = result.element_results[0].element_id
-        parts = eid.split("::")
-        assert len(parts) == 3
-        assert parts[0] == "synergy"
-        assert parts[1] == "column"
-        assert parts[2] == "assessment score"
+        # ID is base64-encoded element_name
+        import base64
+        decoded = base64.b64decode(eid).decode("utf-8")
+        assert decoded == "Assessment Score"
 
     def test_ids_are_unique_across_elements(self) -> None:
         blob = _five_element_blob()
@@ -177,12 +176,15 @@ class TestIdentityDeterminism:
         ids2 = [er.element_id for er in r2.element_results]
         assert ids1 == ids2
 
-    def test_id_is_lowercase(self) -> None:
+    def test_id_is_valid_base64(self) -> None:
         blob = _single_element_blob()
         runner = DeterministicRunner()
         result = runner.run(blob)
         eid = result.element_results[0].element_id
-        assert eid == eid.lower()
+        import base64
+        # Must round-trip through base64 without error
+        decoded = base64.b64decode(eid).decode("utf-8")
+        assert len(decoded) > 0
 
     def test_field_reorder_preserves_identity(self) -> None:
         """Reordering dict keys in elements must produce the same IDs."""
@@ -195,15 +197,17 @@ class TestIdentityDeterminism:
         ids_reord = [er.element_id for er in DeterministicRunner().run(reordered).element_results]
         assert ids_orig == ids_reord
 
-    def test_whitespace_collapsed_in_identity(self) -> None:
-        """Extra spaces in entityName should collapse to single space."""
+    def test_whitespace_in_name_preserved_in_id(self) -> None:
+        """Base64 encoding preserves the original element name, including spaces."""
         blob = _make_blob([
             _make_element(name="  Student   Enrollment  ", entity_type="table"),
         ])
         runner = DeterministicRunner()
         result = runner.run(blob)
         eid = result.element_results[0].element_id
-        assert "  " not in eid
+        import base64
+        decoded = base64.b64decode(eid).decode("utf-8")
+        assert decoded == "  Student   Enrollment  "
 
 
 # ===========================================================================
@@ -411,12 +415,13 @@ class TestDocumentMappingIntegrity:
         document_ids = set(runner.search_index.documents.keys())
         assert element_ids == document_ids
 
-    def test_schema_version_in_document(self) -> None:
+    def test_no_schema_version_in_document(self) -> None:
+        """schemaVersion removed from deployed index — must not appear."""
         blob = _single_element_blob()
         runner = DeterministicRunner()
         runner.run(blob)
         doc = list(runner.search_index.documents.values())[0]
-        assert doc.get("schemaVersion") == SCHEMA_VERSION
+        assert "schemaVersion" not in doc
 
     def test_source_system_in_document(self) -> None:
         blob = _single_element_blob()
@@ -425,15 +430,15 @@ class TestDocumentMappingIntegrity:
         doc = list(runner.search_index.documents.values())[0]
         assert doc.get("sourceSystem") == "synergy"
 
-    def test_entity_type_in_document(self) -> None:
+    def test_element_type_in_document(self) -> None:
         blob = _single_element_blob()
         runner = DeterministicRunner()
         runner.run(blob)
         doc = list(runner.search_index.documents.values())[0]
-        assert doc.get("entityType") == "column"
+        assert doc.get("elementType") == "column"
 
-    def test_schema_field_count_frozen_at_19(self) -> None:
-        assert len(SCHEMA_FIELDS) == 19
+    def test_schema_field_count_frozen_at_13(self) -> None:
+        assert len(SCHEMA_FIELDS) == 13
 
 
 # ===========================================================================
@@ -667,8 +672,8 @@ class TestSchemaContractVerification:
 
     def test_field_counts_align(self) -> None:
         result = IntegrationValidator.verify_schema_contract()
-        assert result["expected_count"] == 19
-        assert result["actual_count"] == 19
+        assert result["expected_count"] == 13
+        assert result["actual_count"] == 13
 
     def test_no_extra_or_missing_fields(self) -> None:
         result = IntegrationValidator.verify_schema_contract()
