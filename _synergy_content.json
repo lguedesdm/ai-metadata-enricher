@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "2.0",
+  "source": "synergy",
+  "system": "StudentInformationSystem",
+  "lastUpdated": "2026-03-30T10:00:00Z",
+  "elements": [
+    {
+      "elementName": "Students.StudentId",
+      "elementType": "column",
+      "dataType": "int",
+      "description": "Unique identifier assigned to each student at the time of enrollment. Remains constant across academic years.",
+      "cedsLink": "https://ceds.ed.gov/element/StudentIdentifier",
+      "sourceSystem": "Synergy"
+    },
+    {
+      "elementName": "Students.EnrollmentDate",
+      "elementType": "column",
+      "dataType": "date",
+      "description": "Date the student was officially enrolled in the district.",
+      "sourceSystem": "Synergy"
+    }
+  ]
+}
