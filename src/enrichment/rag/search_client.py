@@ -36,23 +36,20 @@ from .models import ContextChunk
 logger = logging.getLogger("enrichment.rag.search_client")
 
 # Fields to retrieve from the Azure AI Search index.
-# Aligned with the frozen search index design v1.0.0.
+# Aligned with deployed index metadata-context-index-v1 (13 fields).
 _RETRIEVABLE_FIELDS: list[str] = [
     "id",
     "sourceSystem",
-    "entityType",
-    "entityName",
-    "entityPath",
+    "source",
+    "elementType",
+    "elementName",
+    "title",
     "description",
-    "businessMeaning",
-    "domain",
-    "tags",
+    "suggestedDescription",
     "content",
-    "dataType",
-    "sourceTable",
-    "cedsReference",
+    "tags",
+    "cedsLink",
     "lastUpdated",
-    "schemaVersion",
 ]
 
 
@@ -218,12 +215,10 @@ def _map_result_to_chunk(result: dict[str, Any]) -> ContextChunk | None:
     # Required fields — skip result if missing
     document_id = result.get("id")
     source_system = result.get("sourceSystem", "")
-    entity_type = result.get("entityType", "")
-    entity_name = result.get("entityName", "")
-    entity_path = result.get("entityPath", "")
-    content = result.get("content", "")
+    element_type = result.get("elementType", "")
+    element_name = result.get("elementName", "")
 
-    if not document_id or not entity_name:
+    if not document_id or not element_name:
         logger.warning(
             "Skipping search result with missing required fields",
             extra={"result_keys": list(result.keys())},
@@ -244,17 +239,15 @@ def _map_result_to_chunk(result: dict[str, Any]) -> ContextChunk | None:
     return ContextChunk(
         document_id=document_id,
         source_system=source_system,
-        entity_type=entity_type,
-        entity_name=entity_name,
-        entity_path=entity_path,
-        content=content,
+        element_type=element_type,
+        element_name=element_name,
+        source=result.get("source", "") or "",
+        title=result.get("title", "") or "",
+        content=result.get("content", "") or "",
         description=result.get("description", "") or "",
-        business_meaning=result.get("businessMeaning", "") or "",
-        domain=result.get("domain", "") or "",
+        suggested_description=result.get("suggestedDescription", "") or "",
         tags=tags,
-        data_type=result.get("dataType"),
-        source_table=result.get("sourceTable"),
-        ceds_reference=result.get("cedsReference"),
+        ceds_link=result.get("cedsLink"),
         last_updated=last_updated,
         relevance_score=float(relevance_score),
         reranker_score=float(reranker_score) if reranker_score is not None else None,

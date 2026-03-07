@@ -41,12 +41,12 @@ def assemble_context(
     Format per chunk (compatible with the frozen prompt's expected
     "text excerpts retrieved from Azure AI Search"):
 
-        [Source N] <entityName> (<entityType>, <sourceSystem>)
-        Path: <entityPath>
-        Domain: <domain>
+        [Source N] <elementName> (<elementType>, <sourceSystem>)
+        Source: <source>
+        Title: <title>
         Content: <content>
         Description: <description>
-        Business Meaning: <businessMeaning>
+        Suggested Description: <suggestedDescription>
 
     This format provides the LLM with structured, traceable excerpts
     that satisfy the grounding rules (C003, C004, C006) and enable
@@ -131,14 +131,16 @@ def _format_chunk(chunk: ContextChunk, index: int) -> str:
         Formatted text block string.
     """
     lines = [
-        f"[Source {index}] {chunk.entity_name} ({chunk.entity_type}, {chunk.source_system})"
+        f"[Source {index}] {chunk.element_name} ({chunk.element_type}, {chunk.source_system})"
     ]
 
     lines.append(f"Document ID: {chunk.document_id}")
-    lines.append(f"Path: {chunk.entity_path}")
 
-    if chunk.domain:
-        lines.append(f"Domain: {chunk.domain}")
+    if chunk.source:
+        lines.append(f"Source: {chunk.source}")
+
+    if chunk.title:
+        lines.append(f"Title: {chunk.title}")
 
     if chunk.content:
         lines.append(f"Content: {chunk.content}")
@@ -146,19 +148,13 @@ def _format_chunk(chunk: ContextChunk, index: int) -> str:
     if chunk.description:
         lines.append(f"Description: {chunk.description}")
 
-    if chunk.business_meaning:
-        lines.append(f"Business Meaning: {chunk.business_meaning}")
+    if chunk.suggested_description:
+        lines.append(f"Suggested Description: {chunk.suggested_description}")
 
     if chunk.tags:
         lines.append(f"Tags: {', '.join(chunk.tags)}")
 
-    if chunk.data_type:
-        lines.append(f"Data Type: {chunk.data_type}")
-
-    if chunk.source_table:
-        lines.append(f"Source Table: {chunk.source_table}")
-
-    if chunk.ceds_reference:
-        lines.append(f"CEDS Reference: {chunk.ceds_reference}")
+    if chunk.ceds_link:
+        lines.append(f"CEDS Link: {chunk.ceds_link}")
 
     return "\n".join(lines)

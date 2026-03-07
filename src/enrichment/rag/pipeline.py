@@ -96,8 +96,7 @@ class RAGQueryPipeline:
         asset_id: str,
         entity_type: str,
         source_system: str,
-        entity_name: str,
-        domain: str | None = None,
+        element_name: str,
         correlation_id: str | None = None,
         reference_time: datetime | None = None,
     ) -> RetrievedContext:
@@ -118,9 +117,8 @@ class RAGQueryPipeline:
                 and ``search_metadata``, not sent as a search term).
             entity_type: Asset entity type (e.g. "table", "column").
             source_system: Asset source system (e.g. "synergy").
-            entity_name: Human-readable asset name — used as the search
+            element_name: Human-readable element name — used as the search
                 query text.
-            domain: Optional business domain filter.
             correlation_id: Optional correlation ID propagated into every
                 log entry and into ``search_metadata`` for cross-service
                 tracing with Orchestrator, LLM, and Purview.
@@ -133,10 +131,9 @@ class RAGQueryPipeline:
             ``correlation_id`` for end-to-end traceability.
         """
         context = self.retrieve_context(
-            query=entity_name,
+            query=element_name,
             entity_type=entity_type,
             source_system=source_system,
-            domain=domain,
             correlation_id=correlation_id,
             reference_time=reference_time,
         )
@@ -154,7 +151,6 @@ class RAGQueryPipeline:
         query: str,
         entity_type: str | None = None,
         source_system: str | None = None,
-        domain: str | None = None,
         additional_filters: str | None = None,
         correlation_id: str | None = None,
         reference_time: datetime | None = None,
@@ -184,11 +180,10 @@ class RAGQueryPipeline:
 
         Args:
             query: Search query text (typically asset name or description).
-            entity_type: Optional filter by entity type
+            entity_type: Optional filter by elementType field
                 (e.g., "table", "column", "dataset", "element").
             source_system: Optional filter by source system
                 (e.g., "synergy", "zipline").
-            domain: Optional filter by business domain.
             additional_filters: Optional raw OData filter expression
                 appended to auto-generated filters.
             correlation_id: Optional correlation ID propagated into every
@@ -208,7 +203,6 @@ class RAGQueryPipeline:
         odata_filter = _build_filter(
             entity_type=entity_type,
             source_system=source_system,
-            domain=domain,
             additional_filters=additional_filters,
         )
 
@@ -216,7 +210,6 @@ class RAGQueryPipeline:
             "query": query,
             "entityType": entity_type,
             "sourceSystem": source_system,
-            "domain": domain,
             "filter": odata_filter,
         }
         if correlation_id:
@@ -323,7 +316,6 @@ class RAGQueryPipeline:
 def _build_filter(
     entity_type: str | None = None,
     source_system: str | None = None,
-    domain: str | None = None,
     additional_filters: str | None = None,
 ) -> str | None:
     """Build an OData filter expression from optional parameters.
@@ -332,9 +324,8 @@ def _build_filter(
     if no filters are specified.
 
     Args:
-        entity_type: Filter by entityType field.
+        entity_type: Filter by elementType field.
         source_system: Filter by sourceSystem field.
-        domain: Filter by domain field.
         additional_filters: Raw OData filter expression to append.
 
     Returns:
@@ -344,13 +335,10 @@ def _build_filter(
 
     if entity_type:
         # OData string comparison — value must be quoted
-        conditions.append(f"entityType eq '{entity_type}'")
+        conditions.append(f"elementType eq '{entity_type}'")
 
     if source_system:
         conditions.append(f"sourceSystem eq '{source_system}'")
-
-    if domain:
-        conditions.append(f"domain eq '{domain}'")
 
     if additional_filters:
         conditions.append(f"({additional_filters})")

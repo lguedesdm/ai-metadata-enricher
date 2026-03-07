@@ -26,17 +26,15 @@ class ContextChunk:
     Attributes:
         document_id: Unique identifier from the search index (``id`` field).
         source_system: Source system identifier (synergy, zipline, documentation).
-        entity_type: Type of entity (table, column, dataset, element).
-        entity_name: Human-readable entity name.
-        entity_path: Hierarchical path for navigation and lineage.
+        element_type: Type of element (table, column, dataset, element).
+        element_name: Human-readable element name.
+        source: Source dataset or schema name.
+        title: Display title for the element.
         content: Consolidated text for RAG context (primary search field).
         description: Technical description from source system.
-        business_meaning: Business-oriented explanation.
-        domain: Business domain or subject area.
+        suggested_description: Business-oriented suggested description.
         tags: Categorization tags.
-        data_type: Data type (for columns/elements), if applicable.
-        source_table: Source table name (for column-level entities).
-        ceds_reference: CEDS reference, if applicable.
+        ceds_link: CEDS reference link, if applicable.
         last_updated: Timestamp of last update in source system.
         relevance_score: Search relevance score (from Azure AI Search).
         reranker_score: Semantic reranker score (from Azure AI Search), if available.
@@ -45,17 +43,15 @@ class ContextChunk:
 
     document_id: str
     source_system: str
-    entity_type: str
-    entity_name: str
-    entity_path: str
-    content: str
+    element_type: str
+    element_name: str
+    source: str = ""
+    title: str = ""
+    content: str = ""
     description: str = ""
-    business_meaning: str = ""
-    domain: str = ""
+    suggested_description: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
-    data_type: Optional[str] = None
-    source_table: Optional[str] = None
-    ceds_reference: Optional[str] = None
+    ceds_link: Optional[str] = None
     last_updated: Optional[datetime] = None
     relevance_score: float = 0.0
     reranker_score: Optional[float] = None

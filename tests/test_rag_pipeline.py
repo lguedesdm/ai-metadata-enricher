@@ -40,36 +40,32 @@ from src.enrichment.rag.pipeline import _build_filter
 def _make_chunk(
     document_id: str = "synergy.student.enrollment.table",
     source_system: str = "synergy",
-    entity_type: str = "table",
-    entity_name: str = "Student Enrollment",
-    entity_path: str = "synergy.student.enrollment",
+    element_type: str = "table",
+    element_name: str = "Student Enrollment",
+    source: str = "",
+    title: str = "",
     content: str = "Student enrollment records.",
     description: str = "Stores student enrollment records.",
-    business_meaning: str = "Core enrollment tracking table.",
-    domain: str = "Student Information",
+    suggested_description: str = "Core enrollment tracking table.",
     tags: tuple = ("enrollment", "student"),
     relevance_score: float = 0.8,
     reranker_score: float | None = None,
     last_updated: datetime | None = None,
-    data_type: str | None = None,
-    source_table: str | None = None,
-    ceds_reference: str | None = None,
+    ceds_link: str | None = None,
 ) -> ContextChunk:
     """Create a ContextChunk for testing."""
     return ContextChunk(
         document_id=document_id,
         source_system=source_system,
-        entity_type=entity_type,
-        entity_name=entity_name,
-        entity_path=entity_path,
+        element_type=element_type,
+        element_name=element_name,
+        source=source,
+        title=title,
         content=content,
         description=description,
-        business_meaning=business_meaning,
-        domain=domain,
+        suggested_description=suggested_description,
         tags=tags,
-        data_type=data_type,
-        source_table=source_table,
-        ceds_reference=ceds_reference,
+        ceds_link=ceds_link,
         last_updated=last_updated,
         relevance_score=relevance_score,
         reranker_score=reranker_score,
@@ -225,16 +221,12 @@ class TestModels:
         """ContextChunk stores all fields correctly."""
         dt = datetime(2026, 1, 12, 14, 30, 0, tzinfo=timezone.utc)
         chunk = _make_chunk(
-            data_type="VARCHAR(255)",
-            source_table="STU_ENROLLMENT",
-            ceds_reference="CEDS-00001",
+            ceds_link="https://ceds.ed.gov/CEDS-00001",
             last_updated=dt,
         )
         assert chunk.document_id == "synergy.student.enrollment.table"
         assert chunk.source_system == "synergy"
-        assert chunk.data_type == "VARCHAR(255)"
-        assert chunk.source_table == "STU_ENROLLMENT"
-        assert chunk.ceds_reference == "CEDS-00001"
+        assert chunk.ceds_link == "https://ceds.ed.gov/CEDS-00001"
         assert chunk.last_updated == dt
 
     def test_retrieved_context_has_context_true(self):
@@ -501,27 +493,21 @@ class TestContextAssembly:
         assert "synergy" in formatted
         assert "Document ID: synergy.student.enrollment.table" in formatted
         assert "Content: Student enrollment records." in formatted
-        assert "Domain: Student Information" in formatted
+        assert "Suggested Description: Core enrollment tracking table." in formatted
 
     def test_optional_fields_included(self):
         """Optional fields are included when present."""
         chunk = _make_chunk(
-            data_type="VARCHAR(255)",
-            source_table="STU_ENROLLMENT",
-            ceds_reference="CEDS-00001",
+            ceds_link="https://ceds.ed.gov/CEDS-00001",
         )
         formatted = _format_chunk(chunk, 1)
-        assert "Data Type: VARCHAR(255)" in formatted
-        assert "Source Table: STU_ENROLLMENT" in formatted
-        assert "CEDS Reference: CEDS-00001" in formatted
+        assert "CEDS Link: https://ceds.ed.gov/CEDS-00001" in formatted
 
     def test_optional_fields_omitted_when_none(self):
         """Optional fields are omitted when None."""
-        chunk = _make_chunk(data_type=None, source_table=None, ceds_reference=None)
+        chunk = _make_chunk(ceds_link=None)
         formatted = _format_chunk(chunk, 1)
-        assert "Data Type" not in formatted
-        assert "Source Table" not in formatted
-        assert "CEDS Reference" not in formatted
+        assert "CEDS Link" not in formatted
 
     def test_tags_formatted(self):
         """Tags are comma-separated."""
@@ -531,8 +517,8 @@ class TestContextAssembly:
 
     def test_assemble_multiple_chunks(self):
         """Multiple chunks are joined with double newlines."""
-        c1 = _make_chunk(document_id="a", entity_name="Entity A")
-        c2 = _make_chunk(document_id="b", entity_name="Entity B")
+        c1 = _make_chunk(document_id="a", element_name="Entity A")
+        c2 = _make_chunk(document_id="b", element_name="Entity B")
         ctx = assemble_context(
             query="test",
             ranked_chunks=[c1, c2],
@@ -550,7 +536,7 @@ class TestContextAssembly:
         chunks = [
             _make_chunk(
                 document_id=f"id-{i}",
-                entity_name=f"Entity {i}",
+                element_name=f"Entity {i}",
                 content="X" * 200,
             )
             for i in range(20)
@@ -590,9 +576,9 @@ class TestContextAssembly:
 
     def test_assemble_preserves_chunk_order(self):
         """Chunks are included in the order provided (pre-ranked)."""
-        c1 = _make_chunk(document_id="first", entity_name="First")
-        c2 = _make_chunk(document_id="second", entity_name="Second")
-        c3 = _make_chunk(document_id="third", entity_name="Third")
+        c1 = _make_chunk(document_id="first", element_name="First")
+        c2 = _make_chunk(document_id="second", element_name="Second")
+        c3 = _make_chunk(document_id="third", element_name="Third")
         ctx = assemble_context(
             query="test",
             ranked_chunks=[c1, c2, c3],
@@ -618,7 +604,7 @@ class TestContextAssembly:
         """
         chunk = _make_chunk(
             document_id="synergy.student.enrollment.table",
-            entity_name="Student Enrollment",
+            element_name="Student Enrollment",
             content="Student enrollment records including school assignments.",
         )
         ctx = assemble_context(
@@ -650,22 +636,17 @@ class TestFilterBuilding:
     def test_entity_type_filter(self):
         """Entity type produces correct OData filter."""
         f = _build_filter(entity_type="table")
-        assert f == "entityType eq 'table'"
+        assert f == "elementType eq 'table'"
 
     def test_source_system_filter(self):
         """Source system produces correct OData filter."""
         f = _build_filter(source_system="synergy")
         assert f == "sourceSystem eq 'synergy'"
 
-    def test_domain_filter(self):
-        """Domain produces correct OData filter."""
-        f = _build_filter(domain="Student Information")
-        assert f == "domain eq 'Student Information'"
-
     def test_multiple_filters_combined(self):
         """Multiple filters are combined with 'and'."""
         f = _build_filter(entity_type="table", source_system="synergy")
-        assert "entityType eq 'table'" in f
+        assert "elementType eq 'table'" in f
         assert "sourceSystem eq 'synergy'" in f
         assert " and " in f
 
@@ -775,7 +756,7 @@ class TestRAGQueryPipeline:
 
         call_args = pipeline._search_client.search.call_args
         filters = call_args.kwargs.get("filters") or call_args[1].get("filters")
-        assert "entityType eq 'table'" in filters
+        assert "elementType eq 'table'" in filters
         assert "sourceSystem eq 'synergy'" in filters
 
     def test_search_metadata_populated(self):
@@ -1073,7 +1054,7 @@ class TestRetrieveContextForAsset:
             asset_id="synergy.stu_enrollment.table",
             entity_type="table",
             source_system="synergy",
-            entity_name="Student Enrollment",
+            element_name="Student Enrollment",
         )
         call_kwargs = mock_client.search.call_args.kwargs
         assert call_kwargs["query"] == "Student Enrollment"
@@ -1086,11 +1067,11 @@ class TestRetrieveContextForAsset:
             asset_id="id1",
             entity_type="column",
             source_system="zipline",
-            entity_name="GPA Score",
+            element_name="GPA Score",
         )
         call_kwargs = mock_client.search.call_args.kwargs
         filters = call_kwargs["filters"]
-        assert "entityType eq 'column'" in filters
+        assert "elementType eq 'column'" in filters
         assert "sourceSystem eq 'zipline'" in filters
 
     def test_asset_id_in_search_metadata(self):
@@ -1102,7 +1083,7 @@ class TestRetrieveContextForAsset:
             asset_id="synergy.stu_enrollment.table",
             entity_type="table",
             source_system="synergy",
-            entity_name="Student Enrollment",
+            element_name="Student Enrollment",
             reference_time=ref_time,
         )
         assert context.search_metadata["asset_id"] == "synergy.stu_enrollment.table"
@@ -1116,7 +1097,7 @@ class TestRetrieveContextForAsset:
             asset_id="id1",
             entity_type="table",
             source_system="synergy",
-            entity_name="Test",
+            element_name="Test",
             correlation_id="corr-999",
             reference_time=ref_time,
         )
@@ -1132,16 +1113,14 @@ class TestRetrieveContextForAsset:
             asset_id="zipline.dataset.gpa.table",
             entity_type="table",
             source_system="zipline",
-            entity_name="GPA Dataset",
-            domain="Academic Performance",
+            element_name="GPA Dataset",
         )
         # Verify the pipeline translated these into proper search parameters
         call_kwargs = mock_client.search.call_args.kwargs
         assert call_kwargs["query"] == "GPA Dataset"
         filters = call_kwargs["filters"]
-        assert "entityType eq 'table'" in filters
+        assert "elementType eq 'table'" in filters
         assert "sourceSystem eq 'zipline'" in filters
-        assert "domain eq 'Academic Performance'" in filters
 
     def test_empty_results_returns_valid_context(self):
         """Empty search results produce a valid, inspectable context."""
@@ -1151,7 +1130,7 @@ class TestRetrieveContextForAsset:
             asset_id="id1",
             entity_type="table",
             source_system="synergy",
-            entity_name="Nonexistent",
+            element_name="Nonexistent",
         )
         assert context.has_context is False
         assert context.results_used == 0
