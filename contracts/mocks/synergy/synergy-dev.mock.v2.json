@@ -1,0 +1,84 @@
+{
+  "elements": [
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "Students.StudentId",
+      "description": "Unique identifier assigned to each student record upon initial enrollment in the district.",
+      "content": "Students table column StudentId. Primary key used to link student records across enrollment, attendance, and demographic tables. Data type INTEGER. Source table: Students.",
+      "tags": ["identity", "student", "primary-key"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "Students.FirstName",
+      "description": "Legal first name of the student as recorded in the student information system.",
+      "content": "Students table column FirstName. Stores the student's legal first name used in official records, correspondence, and reporting. Data type VARCHAR. Source table: Students.",
+      "tags": ["student", "demographics", "name"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "Students.LastName",
+      "description": "Legal last name of the student as recorded in the student information system.",
+      "content": "Students table column LastName. Stores the student's legal last name used in official records, correspondence, and reporting. Data type VARCHAR. Source table: Students.",
+      "tags": ["student", "demographics", "name"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "Students.EnrollmentDate",
+      "description": "Date the student was officially enrolled in the district.",
+      "content": "Students table column EnrollmentDate. Records the effective date of the student's enrollment in the district. Used for funding eligibility calculations and attendance tracking. Data type DATE. Source table: Students.",
+      "tags": ["enrollment", "date", "student"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "ARC01_TBL_A.C01",
+      "description": "Primary record identifier for the archive table entry.",
+      "content": "ARC01_TBL_A table column C01. Serves as the primary record identifier within the archive staging table. Data type VARCHAR. Source table: ARC01_TBL_A.",
+      "tags": ["archive", "identifier"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "ARC01_TBL_A.C02",
+      "description": "Code value representing the classification category of the archived record.",
+      "content": "ARC01_TBL_A table column C02. Stores a classification code that categorizes the archived record. Interpretation depends on the context of the source extraction. Data type VARCHAR. Source table: ARC01_TBL_A.",
+      "tags": ["archive", "classification", "code"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "ARC01_TBL_A.C03",
+      "description": "Descriptive text associated with the archived record.",
+      "content": "ARC01_TBL_A table column C03. Contains free-text descriptive content related to the archived entry. May overlap with descriptions found in other source tables. Data type VARCHAR. Source table: ARC01_TBL_A.",
+      "tags": ["archive", "description", "text"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "EnrollmentAudit.StudentId",
+      "description": "Identifier of the student associated with the audited enrollment event.",
+      "content": "EnrollmentAudit table column StudentId. References the student linked to a specific enrollment audit record. Used to trace enrollment changes back to individual students. Data type INTEGER. Source table: EnrollmentAudit.",
+      "tags": ["identity", "student", "audit", "enrollment"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "EnrollmentAudit.RegistrationDate",
+      "description": "Date the enrollment registration event was recorded in the audit log.",
+      "content": "EnrollmentAudit table column RegistrationDate. Captures the timestamp when an enrollment action was logged for audit purposes. Used to verify enrollment timelines and compliance. Data type DATE. Source table: EnrollmentAudit.",
+      "tags": ["audit", "registration", "date", "enrollment"]
+    },
+    {
+      "sourceSystem": "synergy",
+      "entityType": "column",
+      "elementName": "EnrollmentAudit.SourceSystem",
+      "description": "Name of the originating system that generated the enrollment audit record.",
+      "content": "EnrollmentAudit table column SourceSystem. Identifies which upstream system produced the enrollment event being audited. Used for traceability across integrated platforms. Data type VARCHAR. Source table: EnrollmentAudit.",
+      "tags": ["audit", "source", "traceability"]
+    }
+  ]
+}
