@@ -62,7 +62,7 @@ def _make_element(
         "id": f"{source}.{entity_type}.{name.lower().replace(' ', '.')}",
         "sourceSystem": source,
         "entityType": entity_type,
-        "entityName": name,
+        "elementName": name,
         "entityPath": f"{source}.{entity_type}.{name.lower().replace(' ', '.')}",
         "description": description,
         "businessMeaning": f"Business meaning for {name}.",

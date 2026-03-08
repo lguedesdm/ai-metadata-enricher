@@ -9,7 +9,7 @@ Design constraints:
     - The original JSON is never mutated; ``raw_payload`` is a deep copy.
     - Order of the returned list matches the order of ``elements[]``.
     - Deterministic: same input always produces the same output.
-    - Required fields (sourceSystem, entityName, entityType) are strictly
+    - Required fields (sourceSystem, elementName, entityType) are strictly
       validated: missing, empty, or whitespace-only values are rejected
       with an explicit ``ValueError`` that includes the element index.
 """
@@ -25,7 +25,7 @@ from .models import ContextElement
 # Tuple of (JSON key, ContextElement attribute name) for error messages.
 _REQUIRED_FIELDS: Tuple[Tuple[str, str], ...] = (
     ("sourceSystem", "source_system"),
-    ("entityName", "element_name"),
+    ("elementName", "element_name"),
     ("entityType", "element_type"),
 )
 
@@ -128,7 +128,7 @@ def _to_context_element(
 
     return ContextElement(
         source_system=element["sourceSystem"],
-        element_name=element["entityName"],
+        element_name=element["elementName"],
         element_type=element["entityType"],
         description=element.get("description", ""),
         # raw_payload: mutable deep copy — see architectural note above.

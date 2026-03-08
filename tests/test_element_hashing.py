@@ -52,7 +52,7 @@ def _make_element(
             "id": "synergy.student.enrollment.table",
             "sourceSystem": source_system,
             "entityType": element_type,
-            "entityName": element_name,
+            "elementName": element_name,
             "entityPath": "synergy.student.enrollment",
             "description": description,
             "businessMeaning": "Core enrollment information for all students.",
@@ -111,7 +111,7 @@ class TestOrderIndependence:
             "id": "test.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Test",
+            "elementName": "Test",
             "description": "Desc",
             "content": "Content",
         }
@@ -124,7 +124,7 @@ class TestOrderIndependence:
 
     def test_shuffled_keys_produce_same_hash(self):
         base = {
-            "entityName": "Table A",
+            "elementName": "Table A",
             "entityType": "table",
             "id": "a.table",
             "sourceSystem": "zipline",
@@ -137,7 +137,7 @@ class TestOrderIndependence:
             "id": "a.table",
             "description": "Financial records",
             "sourceSystem": "zipline",
-            "entityName": "Table A",
+            "elementName": "Table A",
             "entityType": "table",
         }
         h1 = compute_element_hash(_make_element(raw_payload=base))
@@ -157,7 +157,7 @@ class TestVolatileFieldExclusion:
             "id": "test.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Test",
+            "elementName": "Test",
             "description": "Desc",
             "lastUpdated": "2026-01-01T00:00:00Z",
         }
@@ -173,7 +173,7 @@ class TestVolatileFieldExclusion:
             "id": "v.col",
             "sourceSystem": "zipline",
             "entityType": "column",
-            "entityName": "Col",
+            "elementName": "Col",
             "schemaVersion": "1.0.0",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -190,7 +190,7 @@ class TestVolatileFieldExclusion:
             "id": "s.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "S",
+            "elementName": "S",
             "scanId": "scan-001",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -207,7 +207,7 @@ class TestVolatileFieldExclusion:
             "id": "i.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "I",
+            "elementName": "I",
             "ingestionTime": "2026-01-01T00:00:00Z",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -224,7 +224,7 @@ class TestVolatileFieldExclusion:
             "id": "a.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "A",
+            "elementName": "A",
             "auditInfo": {"user": "alice"},
         }
         payload_b = copy.deepcopy(payload_a)
@@ -241,7 +241,7 @@ class TestVolatileFieldExclusion:
             "id": "u.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "U",
+            "elementName": "U",
         }
         payload_b = copy.deepcopy(payload_a)
         payload_b["_internal_tracking"] = "some-runtime-value"
@@ -259,7 +259,7 @@ class TestVolatileFieldExclusion:
             "id": "all.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "All",
+            "elementName": "All",
             "description": "Base payload",
         }
         with_volatile = copy.deepcopy(base)
@@ -302,7 +302,7 @@ class TestLogicalChangeDetection:
             "id": "d.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "D",
+            "elementName": "D",
             "description": "Original description",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -314,15 +314,15 @@ class TestLogicalChangeDetection:
             _make_element(raw_payload=payload_b)
         )
 
-    def test_entityName_change_produces_different_hash(self):
+    def test_elementName_change_produces_different_hash(self):
         payload_a = {
             "id": "n.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Original Name",
+            "elementName": "Original Name",
         }
         payload_b = copy.deepcopy(payload_a)
-        payload_b["entityName"] = "Renamed Entity"
+        payload_b["elementName"] = "Renamed Entity"
 
         assert compute_element_hash(
             _make_element(raw_payload=payload_a)
@@ -335,7 +335,7 @@ class TestLogicalChangeDetection:
             "id": "c.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "C",
+            "elementName": "C",
             "content": "Original content for RAG embedding.",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -352,7 +352,7 @@ class TestLogicalChangeDetection:
             "id": "bm.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "BM",
+            "elementName": "BM",
             "businessMeaning": "Records purchases",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -369,7 +369,7 @@ class TestLogicalChangeDetection:
             "id": "t.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "T",
+            "elementName": "T",
             "tags": ["alpha", "beta"],
         }
         payload_b = copy.deepcopy(payload_a)
@@ -386,7 +386,7 @@ class TestLogicalChangeDetection:
             "id": "dom.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Dom",
+            "elementName": "Dom",
             "domain": "Finance",
         }
         payload_b = copy.deepcopy(payload_a)
@@ -403,7 +403,7 @@ class TestLogicalChangeDetection:
             "id": "first.id",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "X",
+            "elementName": "X",
         }
         payload_b = copy.deepcopy(payload_a)
         payload_b["id"] = "second.id"
@@ -440,7 +440,7 @@ class TestDeterministicSerialisation:
                 "id": "compact.table",
                 "sourceSystem": "synergy",
                 "entityType": "table",
-                "entityName": "Compact",
+                "elementName": "Compact",
             }
         )
         canonical = canonicalize_element(elem)
@@ -457,7 +457,7 @@ class TestDeterministicSerialisation:
         elem = _make_element(
             raw_payload={
                 "id": "uni.table",
-                "entityName": "Ünïcödé Tàble",
+                "elementName": "Ünïcödé Tàble",
                 "description": "Contains « special » characters — like em-dashes",
             }
         )
@@ -478,7 +478,7 @@ class TestCollectionNormalisation:
             "id": "tag.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Tag",
+            "elementName": "Tag",
             "tags": ["charlie", "alpha", "bravo"],
         }
         payload_b = copy.deepcopy(payload_a)
@@ -495,7 +495,7 @@ class TestCollectionNormalisation:
             "id": "dup.tag",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "DupTag",
+            "elementName": "DupTag",
             "tags": ["alpha", "beta"],
         }
         payload_b = copy.deepcopy(payload_a)
@@ -514,7 +514,7 @@ class TestCollectionNormalisation:
             "id": "rel.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Rel",
+            "elementName": "Rel",
             "relationships": [rel_a, rel_b],
         }
         payload_b = copy.deepcopy(payload_a)
@@ -533,7 +533,7 @@ class TestCollectionNormalisation:
             "id": "col.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Col",
+            "elementName": "Col",
             "columns": [col_a, col_b],
         }
         payload_b = copy.deepcopy(payload_a)
@@ -550,7 +550,7 @@ class TestCollectionNormalisation:
             "id": "lin.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Lin",
+            "elementName": "Lin",
             "lineage": ["parent.c", "parent.a", "parent.b"],
         }
         payload_b = copy.deepcopy(payload_a)
@@ -577,7 +577,7 @@ class TestEdgeCases:
                 "id": "min.table",
                 "sourceSystem": "synergy",
                 "entityType": "table",
-                "entityName": "Minimal",
+                "elementName": "Minimal",
             }
         )
         h = compute_element_hash(elem)
@@ -588,7 +588,7 @@ class TestEdgeCases:
             "id": "et.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Empty Tags",
+            "elementName": "Empty Tags",
             "tags": [],
         }
         h1 = compute_element_hash(_make_element(raw_payload=payload_a))
@@ -601,14 +601,14 @@ class TestEdgeCases:
             "id": "ed.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "ED",
+            "elementName": "ED",
             "description": "",
         }
         payload_without = {
             "id": "ed.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "ED",
+            "elementName": "ED",
         }
         # empty-string is different from absent
         assert compute_element_hash(
@@ -623,7 +623,7 @@ class TestEdgeCases:
             "id": "mut.table",
             "sourceSystem": "synergy",
             "entityType": "table",
-            "entityName": "Mut",
+            "elementName": "Mut",
             "lastUpdated": "2026-01-01T00:00:00Z",
             "tags": ["bravo", "alpha"],
         }

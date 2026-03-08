@@ -15,7 +15,7 @@ MATERIAL_FIELDS = {
     "id",
     "sourceSystem",
     "entityType",
-    "entityName",
+    "elementName",
     "entityPath",
     "description",
     "businessMeaning",

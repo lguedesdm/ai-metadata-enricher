@@ -8,7 +8,7 @@
     "id",
     "sourceSystem",
     "entityType",
-    "entityName",
+    "elementName",
     "entityPath",
     "content",
     "lastUpdated",
@@ -41,7 +41,7 @@
         "element"
       ]
     },
-    "entityName": {
+    "elementName": {
       "type": "string",
       "description": "Human-readable name of the metadata entity.",
       "minLength": 1,
@@ -160,7 +160,7 @@
       "id": "zipline.assessment.results.table",
       "sourceSystem": "zipline",
       "entityType": "table",
-      "entityName": "Assessment Results",
+      "elementName": "Assessment Results",
       "entityPath": "zipline.assessment.results",
       "description": "Stores student assessment results including scores, dates, and assessment metadata.",
       "businessMeaning": "This table contains all assessment results for students across various test types. It tracks scores, completion dates, and links to assessment definitions. Used by reporting, analytics, and state reporting systems.",

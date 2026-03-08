@@ -31,7 +31,7 @@ def _valid_element(**overrides: object) -> dict:
     base = {
         "sourceSystem": "synergy",
         "entityType": "table",
-        "entityName": "Student Enrollment",
+        "elementName": "Student Enrollment",
         "description": "Stores student enrollment records.",
     }
     base.update(overrides)
@@ -48,7 +48,7 @@ def _synergy_blob() -> dict:
                 "id": "synergy.student.enrollment.table",
                 "sourceSystem": "synergy",
                 "entityType": "table",
-                "entityName": "Student Enrollment",
+                "elementName": "Student Enrollment",
                 "entityPath": "synergy.student.enrollment",
                 "description": "Stores student enrollment records.",
                 "businessMeaning": "Core enrollment information.",
@@ -62,7 +62,7 @@ def _synergy_blob() -> dict:
                 "id": "synergy.student.demographics.ethnicity.column",
                 "sourceSystem": "synergy",
                 "entityType": "column",
-                "entityName": "Ethnicity",
+                "elementName": "Ethnicity",
                 "entityPath": "synergy.student.demographics.ethnicity",
                 "description": "Primary reported ethnicity.",
                 "businessMeaning": "Used for equity reporting.",
@@ -88,7 +88,7 @@ def _zipline_blob() -> dict:
                 "id": "zipline.assessment.definition.element",
                 "sourceSystem": "zipline",
                 "entityType": "element",
-                "entityName": "Assessment Definition",
+                "elementName": "Assessment Definition",
                 "entityPath": "zipline.assessment.definition",
                 "description": "Canonical definition of an assessment.",
                 "businessMeaning": "Authoritative metadata for assessments.",
@@ -169,7 +169,7 @@ class TestSplitElementsOrder:
         names = [f"Element_{i}" for i in range(20)]
         blob = {
             "elements": [
-                _valid_element(entityName=name)
+                _valid_element(elementName=name)
                 for name in names
             ]
         }
@@ -273,7 +273,7 @@ class TestSplitElementsRequiredFieldMissing:
 
     def test_missing_element_name_raises(self):
         el = _valid_element()
-        del el["entityName"]
+        del el["elementName"]
         with pytest.raises(ValueError, match=r"index 0.*element_name"):
             split_elements({"elements": [el]})
 
@@ -292,7 +292,7 @@ class TestSplitElementsRequiredFieldMissing:
         """Error must reference index 1, not 0."""
         good = _valid_element()
         bad = _valid_element()
-        del bad["entityName"]
+        del bad["elementName"]
         with pytest.raises(ValueError, match=r"index 1.*element_name"):
             split_elements({"elements": [good, bad]})
 
@@ -310,7 +310,7 @@ class TestSplitElementsRequiredFieldEmpty:
 
     def test_empty_element_name_raises(self):
         with pytest.raises(ValueError, match=r"index 0.*element_name"):
-            split_elements({"elements": [_valid_element(entityName="")]})
+            split_elements({"elements": [_valid_element(elementName="")]})
 
     def test_empty_element_type_raises(self):
         with pytest.raises(ValueError, match=r"index 0.*element_type"):
@@ -330,7 +330,7 @@ class TestSplitElementsRequiredFieldWhitespace:
 
     def test_whitespace_element_name_raises(self):
         with pytest.raises(ValueError, match=r"index 0.*element_name"):
-            split_elements({"elements": [_valid_element(entityName="\t\n")]})
+            split_elements({"elements": [_valid_element(elementName="\t\n")]})
 
     def test_whitespace_element_type_raises(self):
         with pytest.raises(ValueError, match=r"index 0.*element_type"):
@@ -350,7 +350,7 @@ class TestSplitElementsRequiredFieldNonString:
 
     def test_none_element_name_raises(self):
         with pytest.raises(ValueError, match=r"index 0.*element_name"):
-            split_elements({"elements": [_valid_element(entityName=None)]})
+            split_elements({"elements": [_valid_element(elementName=None)]})
 
     def test_list_element_type_raises(self):
         with pytest.raises(ValueError, match=r"index 0.*element_type"):

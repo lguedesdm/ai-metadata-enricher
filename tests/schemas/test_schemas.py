@@ -113,7 +113,7 @@ def run_tests():
         "id": "synergy.test.table",
         "sourceSystem": "synergy",
         "entityType": "table",
-        "entityName": "Test Table",
+        "elementName": "Test Table",
         "entityPath": "synergy.test.table",
         "content": "This is valid content for testing purposes.",
         "lastUpdated": "2026-01-14T10:00:00Z",
@@ -127,7 +127,7 @@ def run_tests():
             {
                 "sourceSystem": "synergy",
                 "entityType": "table",
-                "entityName": "Test Table",
+                "elementName": "Test Table",
                 "entityPath": "synergy.test.table",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T10:00:00Z",
@@ -140,7 +140,7 @@ def run_tests():
                 "id": "synergy.test.table",
                 "sourceSystem": "zipline",  # Should be "synergy"
                 "entityType": "table",
-                "entityName": "Test Table",
+                "elementName": "Test Table",
                 "entityPath": "synergy.test.table",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T10:00:00Z",
@@ -153,7 +153,7 @@ def run_tests():
                 "id": "synergy.test.table",
                 "sourceSystem": "synergy",
                 "entityType": "invalid_type",  # Not in enum
-                "entityName": "Test Table",
+                "elementName": "Test Table",
                 "entityPath": "synergy.test.table",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T10:00:00Z",
@@ -166,7 +166,7 @@ def run_tests():
                 "id": "synergy/test@table",  # Should match ^[a-zA-Z0-9._-]+$
                 "sourceSystem": "synergy",
                 "entityType": "table",
-                "entityName": "Test Table",
+                "elementName": "Test Table",
                 "entityPath": "synergy.test.table",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T10:00:00Z",
@@ -179,7 +179,7 @@ def run_tests():
                 "id": "synergy.test.table",
                 "sourceSystem": "synergy",
                 "entityType": "table",
-                "entityName": "Test Table",
+                "elementName": "Test Table",
                 "entityPath": "synergy.test.table",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T10:00:00Z",
@@ -204,7 +204,7 @@ def run_tests():
         "id": "zipline.assessment.results",
         "sourceSystem": "zipline",
         "entityType": "dataset",
-        "entityName": "Assessment Results",
+        "elementName": "Assessment Results",
         "entityPath": "zipline.assessment.results",
         "content": "Assessment results dataset containing student performance data.",
         "lastUpdated": "2026-01-14T11:30:00Z",
@@ -219,7 +219,7 @@ def run_tests():
                 "id": "zipline.test.dataset",
                 "sourceSystem": "zipline",
                 "entityType": "dataset",
-                "entityName": "Test Dataset",
+                "elementName": "Test Dataset",
                 "entityPath": "zipline.test.dataset",
                 "lastUpdated": "2026-01-14T11:30:00Z",
                 "schemaVersion": "1.0.0"
@@ -231,7 +231,7 @@ def run_tests():
                 "id": "zipline.test.dataset",
                 "sourceSystem": "synergy",  # Should be "zipline"
                 "entityType": "dataset",
-                "entityName": "Test Dataset",
+                "elementName": "Test Dataset",
                 "entityPath": "zipline.test.dataset",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T11:30:00Z",
@@ -239,12 +239,12 @@ def run_tests():
             }
         ),
         (
-            "empty entityName (violates minLength)",
+            "empty elementName (violates minLength)",
             {
                 "id": "zipline.test.dataset",
                 "sourceSystem": "zipline",
                 "entityType": "dataset",
-                "entityName": "",  # minLength is 1
+                "elementName": "",  # minLength is 1
                 "entityPath": "zipline.test.dataset",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14T11:30:00Z",
@@ -257,7 +257,7 @@ def run_tests():
                 "id": "zipline.test.dataset",
                 "sourceSystem": "zipline",
                 "entityType": "dataset",
-                "entityName": "Test Dataset",
+                "elementName": "Test Dataset",
                 "entityPath": "zipline.test.dataset",
                 "content": "Content here",
                 "lastUpdated": "2026-01-14",  # Should be ISO 8601 date-time

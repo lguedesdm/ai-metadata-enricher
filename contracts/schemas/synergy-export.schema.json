@@ -8,7 +8,7 @@
     "id",
     "sourceSystem",
     "entityType",
-    "entityName",
+    "elementName",
     "entityPath",
     "content",
     "lastUpdated",
@@ -41,7 +41,7 @@
         "element"
       ]
     },
-    "entityName": {
+    "elementName": {
       "type": "string",
       "description": "Human-readable name of the metadata entity.",
       "minLength": 1,
@@ -160,7 +160,7 @@
       "id": "synergy.student.enrollment.table",
       "sourceSystem": "synergy",
       "entityType": "table",
-      "entityName": "Student Enrollment",
+      "elementName": "Student Enrollment",
       "entityPath": "synergy.student.enrollment",
       "description": "Stores student enrollment records including enrollment dates and status.",
       "businessMeaning": "This table contains the core enrollment information for all students, tracking when they enrolled, their current status, and enrollment type. Used by attendance, scheduling, and reporting systems.",
