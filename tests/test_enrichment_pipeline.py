@@ -283,13 +283,14 @@ class TestRAGContextRetrieval:
             )
 
         # Assert: RAG was called before LLM (enforced by sequential pipeline)
-        mock_rag.retrieve_context_for_asset.assert_called_once_with(
-            asset_id=ASSET_ID,
-            entity_type=ENTITY_TYPE,
-            source_system=SOURCE_SYSTEM,
-            element_name=ELEMENT_NAME,
-            correlation_id=CORRELATION_ID,
-        )
+        call_kwargs = mock_rag.retrieve_context_for_asset.call_args.kwargs
+        assert call_kwargs["asset_id"] == ASSET_ID
+        assert call_kwargs["entity_type"] == ENTITY_TYPE
+        assert call_kwargs["source_system"] == SOURCE_SYSTEM
+        assert call_kwargs["element_name"] == ELEMENT_NAME
+        assert call_kwargs["correlation_id"] == CORRELATION_ID
+        # reference_time must be present (passed from orchestrator / pipeline)
+        assert "reference_time" in call_kwargs
 
     @patch("src.enrichment.pipeline.enrichment_pipeline._build_rag_pipeline")
     @patch("src.enrichment.pipeline.enrichment_pipeline._build_llm_client")
@@ -907,7 +908,8 @@ class TestStatePersistence:
         # The pipeline writes exactly one state record (after writeback)
         assert len(written_states) == 1
         assert written_states[0]["contentHash"] == CURRENT_HASH
-        assert written_states[0]["correlationId"] == CORRELATION_ID
+        # correlationId and enrichmentStatus must NOT be in the state record (schema violation)
+        assert "correlationId" not in written_states[0]
         assert "enrichmentStatus" not in written_states[0]
 
 
@@ -1398,3 +1400,205 @@ class TestPromptBuilder:
         assert "suggested_description" in user_content
         assert "confidence" in user_content
         assert "used_sources" in user_content
+
+
+# ---------------------------------------------------------------------------
+# Completion Criteria Tests — Test 3 (State Schema) & Test 4 (Execution Duration)
+# ---------------------------------------------------------------------------
+
+
+class TestStateSchemaCompliance:
+    """Test 3 — State Schema Compliance (completion criterion).
+
+    State records written by the pipeline must contain ONLY the five frozen
+    fields defined in STATE_RECORD_FIELDS.  No extra fields are permitted.
+    """
+
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_rag_pipeline")
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_llm_client")
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_purview_client")
+    def test_state_record_contains_only_frozen_fields(
+        self,
+        mock_build_purview,
+        mock_build_llm,
+        mock_build_rag,
+    ) -> None:
+        """State record must contain exactly: id, entityType, sourceSystem,
+        contentHash, lastProcessed — nothing else."""
+        from src.infrastructure.state_store.models import STATE_RECORD_FIELDS
+
+        mock_rag = MagicMock()
+        mock_rag.retrieve_context_for_asset.return_value = _make_mock_rag_context()
+        mock_build_rag.return_value = mock_rag
+
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_build_llm.return_value = mock_llm
+
+        mock_purview = MagicMock()
+        mock_build_purview.return_value = mock_purview
+
+        state_store = _make_mock_state_store()
+        written_states: List[Dict] = []
+
+        def capture_state(item):
+            written_states.append(dict(item))
+            return {}
+
+        state_store.upsert_state.side_effect = capture_state
+
+        with patch(
+            "src.enrichment.purview_writeback.PurviewWritebackService.write_suggested_description",
+            return_value=_make_writeback_result(success=True),
+        ):
+            run_enrichment_pipeline(
+                asset=VALID_ASSET,
+                asset_id=ASSET_ID,
+                entity_type=ENTITY_TYPE,
+                source_system=SOURCE_SYSTEM,
+                element_name=ELEMENT_NAME,
+                correlation_id=CORRELATION_ID,
+                current_hash=CURRENT_HASH,
+                state_store=state_store,
+            )
+
+        assert len(written_states) == 1
+        actual_fields = set(written_states[0].keys())
+        unexpected = actual_fields - STATE_RECORD_FIELDS
+        assert not unexpected, (
+            f"State record contains forbidden fields: {unexpected}. "
+            f"Only {STATE_RECORD_FIELDS} are allowed."
+        )
+        missing = STATE_RECORD_FIELDS - actual_fields
+        assert not missing, (
+            f"State record is missing required fields: {missing}."
+        )
+
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_rag_pipeline")
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_llm_client")
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_purview_client")
+    def test_orchestrator_skip_state_record_contains_only_frozen_fields(
+        self,
+        mock_build_purview,
+        mock_build_llm,
+        mock_build_rag,
+    ) -> None:
+        """SKIP path: orchestrator state record must also contain only frozen fields."""
+        from src.infrastructure.state_store.models import STATE_RECORD_FIELDS
+        from src.orchestrator.message_handler import handle_message
+        import json
+
+        # Provide a previous state with the same hash so SKIP fires
+        mock_store = MagicMock()
+        written_states: List[Dict] = []
+
+        def capture_state(item):
+            written_states.append(dict(item))
+            return {}
+
+        # We need to know the hash the orchestrator will compute for VALID_ASSET.
+        # Use the domain hasher to get the exact hash.
+        from src.domain.element_splitter import ContextElement
+        from src.domain.element_hashing import compute_element_hash_result
+
+        element = ContextElement(
+            source_system=VALID_ASSET["sourceSystem"],
+            element_name=VALID_ASSET["entityName"],
+            element_type=VALID_ASSET["entityType"],
+            description=VALID_ASSET.get("description", ""),
+            raw_payload=VALID_ASSET,
+        )
+        hash_result = compute_element_hash_result(element)
+        expected_hash = hash_result.content_hash
+
+        mock_store.get_state.return_value = {
+            "id": hash_result.element_id,
+            "entityType": ENTITY_TYPE,
+            "contentHash": expected_hash,  # same hash → SKIP
+        }
+        mock_store.upsert_state.side_effect = capture_state
+        mock_store.upsert_audit.return_value = {}
+
+        _handler_pipeline_patch = "src.enrichment.pipeline.enrichment_pipeline.run_enrichment_pipeline"
+        with patch(_handler_pipeline_patch) as mock_pipeline:
+            handle_message(json.dumps(VALID_ASSET), state_store=mock_store)
+            mock_pipeline.assert_not_called()
+
+        assert len(written_states) == 1
+        actual_fields = set(written_states[0].keys())
+        unexpected = actual_fields - STATE_RECORD_FIELDS
+        assert not unexpected, (
+            f"SKIP state record contains forbidden fields: {unexpected}. "
+            f"Only {STATE_RECORD_FIELDS} are allowed."
+        )
+
+
+class TestExecutionDurationAudit:
+    """Test 4 — Execution Duration (completion criterion).
+
+    The pipeline audit record must contain executionDurationMs capturing the
+    LLM inference wall-clock duration in milliseconds.
+    """
+
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_rag_pipeline")
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_llm_client")
+    @patch("src.enrichment.pipeline.enrichment_pipeline._build_purview_client")
+    def test_audit_record_contains_execution_duration_ms(
+        self,
+        mock_build_purview,
+        mock_build_llm,
+        mock_build_rag,
+    ) -> None:
+        """Successful pipeline run: audit record must have executionDurationMs >= 0."""
+        mock_rag = MagicMock()
+        mock_rag.retrieve_context_for_asset.return_value = _make_mock_rag_context()
+        mock_build_rag.return_value = mock_rag
+
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_build_llm.return_value = mock_llm
+
+        mock_purview = MagicMock()
+        mock_build_purview.return_value = mock_purview
+
+        state_store = _make_mock_state_store()
+        audit_records: List[Dict] = []
+
+        def capture_audit(item):
+            audit_records.append(dict(item))
+            return {}
+
+        state_store.upsert_audit.side_effect = capture_audit
+
+        with patch(
+            "src.enrichment.purview_writeback.PurviewWritebackService.write_suggested_description",
+            return_value=_make_writeback_result(success=True),
+        ):
+            run_enrichment_pipeline(
+                asset=VALID_ASSET,
+                asset_id=ASSET_ID,
+                entity_type=ENTITY_TYPE,
+                source_system=SOURCE_SYSTEM,
+                element_name=ELEMENT_NAME,
+                correlation_id=CORRELATION_ID,
+                current_hash=CURRENT_HASH,
+                state_store=state_store,
+            )
+
+        # Find the pipeline enrichment audit record (not the orchestrator decision audit)
+        pipeline_audits = [
+            r for r in audit_records
+            if r.get("recordType") == "enrichment_audit"
+        ]
+        assert pipeline_audits, (
+            "No enrichment_audit audit record found. "
+            f"Audit records written: {[r.get('recordType') for r in audit_records]}"
+        )
+        audit = pipeline_audits[0]
+        assert "executionDurationMs" in audit, (
+            "executionDurationMs missing from pipeline audit record"
+        )
+        assert isinstance(audit["executionDurationMs"], int), (
+            "executionDurationMs must be an int"
+        )
+        assert audit["executionDurationMs"] >= 0

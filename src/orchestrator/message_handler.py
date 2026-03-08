@@ -3,14 +3,17 @@ Message handler for the Orchestrator.
 
 Processes a single Service Bus message by:
 1. Parsing the JSON payload
-2. Extracting asset identifiers
-3. Computing the asset hash
-4. Reading previous state from Cosmos DB (via Managed Identity)
-5. Calling the domain-level decision logic (SKIP / REPROCESS)
-6. On SKIP  — writing state and audit records to Cosmos DB
-7. On REPROCESS — invoking the enrichment pipeline (RAG → LLM →
-   Validation → Purview Writeback → State Update → Audit)
-8. Logging the result with correlationId
+2. Generating a single reference_time for the entire message (determinism)
+3. Splitting the asset into ContextElement objects (element splitter)
+4. For each element independently:
+   a. Computing the element hash
+   b. Reading previous element state from Cosmos DB
+   c. Calling the domain-level decision logic (SKIP / REPROCESS)
+   d. On SKIP  — writing schema-compliant state and audit to Cosmos DB
+   e. On REPROCESS — invoking the enrichment pipeline (RAG → LLM →
+      Validation → Purview Writeback → State Update → Audit)
+5. Aggregating per-element results into a single MessageProcessingResult
+6. Logging the result with correlationId
 
 Cosmos DB access uses Managed Identity exclusively — no keys or secrets.
 
@@ -19,19 +22,24 @@ Pipeline integration contract:
 - Enrichment logic lives exclusively in src/enrichment/pipeline/.
 - State is updated only after successful Purview writeback (REPROCESS path).
 - On SKIP the state is confirmed immediately (no writeback needed).
+- reference_time is generated once per message and propagated to every
+  element so retries use the same temporal context.
+- State records contain only frozen schema fields:
+    id, entityType, sourceSystem, contentHash, lastProcessed
 """
 
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from src.domain.change_detection import (
     DecisionResult,
-    compute_asset_hash,
     decide_reprocess_or_skip,
 )
+from src.domain.element_splitter import ContextElement, split_elements
+from src.domain.element_hashing import compute_element_hash_result
 
 if TYPE_CHECKING:
     from .cosmos_state_store import CosmosStateStore
@@ -62,6 +70,7 @@ class MessageProcessingResult:
 def handle_message(
     message_body: str | bytes,
     state_store: Optional["CosmosStateStore"] = None,
+    reference_time: Optional[datetime] = None,
 ) -> MessageProcessingResult:
     """
     Process a single Service Bus message.
@@ -77,8 +86,13 @@ def handle_message(
     All Cosmos DB access uses Managed Identity — no keys or secrets.
 
     Args:
-        message_body: Raw message body (str or bytes).
-        state_store:  Optional Cosmos DB state store (Managed Identity).
+        message_body:   Raw message body (str or bytes).
+        state_store:    Optional Cosmos DB state store (Managed Identity).
+        reference_time: Stable reference time for RAG freshness scoring.
+            Must be derived from a stable message attribute (e.g.
+            ServiceBusReceivedMessage.enqueued_time_utc) so that the same
+            message produces the same reference_time on every retry.
+            Falls back to datetime.now(utc) when not provided (test mode).
 
     Returns:
         MessageProcessingResult with the decision outcome.
@@ -101,186 +115,210 @@ def handle_message(
             else message_body
         )
         asset: Dict[str, Any] = json.loads(body_str)
-
-        # -- Extract identifiers -------------------------------------------
-        asset_id: str = asset.get("id", "unknown")
-        source_system: str = asset.get("sourceSystem", "unknown")
-        entity_type: str = asset.get("entityType", "unknown")
-
-        logger.info(
-            "Asset identified",
-            extra={
-                "correlationId": correlation_id,
-                "assetId": asset_id,
-                "sourceSystem": source_system,
-                "entityType": entity_type,
-            },
-        )
-
-        # -- Compute hash --------------------------------------------------
-        current_hash: str = compute_asset_hash(asset)
-
-        # -- Read previous state from Cosmos DB (if available) -------------
-        # Domain contract: if previous state cannot be determined for ANY
-        # reason (no store, not found, Cosmos failure), default to
-        # previous_state = None → REPROCESS.  Cosmos read failures must
-        # never cause message ABANDON.
-        previous_state = None
-        if state_store is not None:
-            try:
-                previous_item = state_store.get_state(
-                    asset_id=asset_id,
-                    entity_type=entity_type,
-                )
-                if previous_item is not None:
-                    previous_state = previous_item.get("contentHash")
-                    logger.info(
-                        "Previous state loaded from Cosmos DB",
-                        extra={
-                            "correlationId": correlation_id,
-                            "assetId": asset_id,
-                            "authMethod": "ManagedIdentity",
-                        },
-                    )
-            except Exception as cosmos_read_exc:
-                # Deterministic fallback: treat as no previous state → REPROCESS.
-                # This covers 429 throttling, 403 auth errors, timeouts, and
-                # any other transient or permanent Cosmos failure.
-                logger.warning(
-                    "Cosmos DB state read failed — falling back to REPROCESS: %s",
-                    cosmos_read_exc,
-                    extra={
-                        "correlationId": correlation_id,
-                        "assetId": asset_id,
-                        "entityType": entity_type,
-                        "cosmosError": type(cosmos_read_exc).__name__,
-                        "fallbackDecision": "REPROCESS",
-                    },
-                )
-                # previous_state remains None → REPROCESS
-
-        # -- Domain decision -----------------------------------------------
-        decision: DecisionResult = decide_reprocess_or_skip(
-            current_hash=current_hash,
-            previous_state=previous_state,
-        )
-
-        logger.info(
-            "Decision: %s",
-            decision.value,
-            extra={
-                "correlationId": correlation_id,
-                "assetId": asset_id,
-                "sourceSystem": source_system,
-                "entityType": entity_type,
-                "decision": decision.value,
-                "currentHash": current_hash[:16] + "...",
-            },
-        )
-
-        # -- Branch on decision -------------------------------------------
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        if decision == DecisionResult.SKIP:
-            # SKIP: asset unchanged — write state confirmation + audit.
-            # No enrichment pipeline invocation.
-            if state_store is not None:
-                state_store.upsert_state({
-                    "id": asset_id,
-                    "entityType": entity_type,
-                    "sourceSystem": source_system,
-                    "contentHash": current_hash,
-                    "decision": decision.value,
-                    "correlationId": correlation_id,
-                    "updatedAt": now_iso,
-                })
-                audit_id = f"orch:{asset_id}:{correlation_id}"
-                state_store.upsert_audit({
-                    "id": audit_id,
-                    "entityType": entity_type,
-                    "assetId": asset_id,
-                    "sourceSystem": source_system,
-                    "decision": decision.value,
-                    "contentHash": current_hash,
-                    "correlationId": correlation_id,
-                    "processedAt": now_iso,
-                    "recordType": "orchestrator_decision",
-                })
-                logger.info(
-                    "SKIP — state and audit written to Cosmos DB",
-                    extra={
-                        "correlationId": correlation_id,
-                        "assetId": asset_id,
-                        "authMethod": "ManagedIdentity",
-                    },
-                )
-
-            return MessageProcessingResult(
-                correlation_id=correlation_id,
-                asset_id=asset_id,
-                decision=decision.value,
-                success=True,
+        if not isinstance(asset, dict):
+            raise ValueError(
+                f"Message body must be a JSON object, got {type(asset).__name__}"
             )
 
-        # REPROCESS: asset new or changed — invoke enrichment pipeline.
-        # Write orchestrator decision audit before handing off.
-        # State is written by the pipeline AFTER successful Purview writeback.
-        if state_store is not None:
-            orch_audit_id = f"orch:{asset_id}:{correlation_id}"
-            state_store.upsert_audit({
-                "id": orch_audit_id,
-                "entityType": entity_type,
-                "assetId": asset_id,
-                "sourceSystem": source_system,
-                "decision": decision.value,
-                "contentHash": current_hash,
-                "correlationId": correlation_id,
-                "processedAt": now_iso,
-                "recordType": "orchestrator_decision",
-            })
+        # -- Message-level identifier (for result reporting) ---------------
+        asset_id: str = asset.get("id", "unknown")
 
         logger.info(
-            "REPROCESS — invoking enrichment pipeline",
+            "Asset payload parsed",
             extra={
                 "correlationId": correlation_id,
                 "assetId": asset_id,
-                "entityType": entity_type,
-                "sourceSystem": source_system,
             },
         )
+
+        # -- Reference time — anchored to message enqueue time -------------
+        # Derived from ServiceBusReceivedMessage.enqueued_time_utc by the
+        # consumer so the same physical message always produces the same
+        # reference_time, even across Service Bus redeliveries.
+        # This makes RAG freshness scoring deterministic across retries.
+        # Falls back to datetime.now(utc) only in test mode (no consumer).
+        if reference_time is None:
+            reference_time = datetime.now(timezone.utc)
+
+        # -- Element split --------------------------------------------------
+        # Decompose the asset payload into individual ContextElement objects.
+        # If the payload has no 'elements' array, the whole asset is treated
+        # as a single element (backward compat with flat asset payloads).
+        elements: List[ContextElement] = _split_asset_elements(asset)
+
+        logger.info(
+            "Asset split into %d element(s)",
+            len(elements),
+            extra={
+                "correlationId": correlation_id,
+                "assetId": asset_id,
+                "elementCount": len(elements),
+            },
+        )
+
+        # -- Per-element processing loop -----------------------------------
+        # Each element is processed independently: hash → state check →
+        # decision → SKIP/REPROCESS.  All elements in this message share
+        # the same correlation_id and reference_time.
+        element_successes: List[bool] = []
+        element_decisions: List[str] = []
+        first_error: Optional[str] = None
 
         from src.enrichment.pipeline.enrichment_pipeline import (  # noqa: PLC0415
             run_enrichment_pipeline,
         )
 
-        pipeline_result = run_enrichment_pipeline(
-            asset=asset,
-            asset_id=asset_id,
-            entity_type=entity_type,
-            source_system=source_system,
-            element_name=asset.get("entityName", asset_id),
-            correlation_id=correlation_id,
-            current_hash=current_hash,
-            state_store=state_store,
-        )
+        for element in elements:
+            # -- Element hash ----------------------------------------------
+            hash_result = compute_element_hash_result(element)
+            element_id: str = hash_result.element_id
+            element_hash: str = hash_result.content_hash
 
-        logger.info(
-            "Enrichment pipeline returned",
-            extra={
-                "correlationId": correlation_id,
-                "assetId": asset_id,
-                "pipelineSuccess": pipeline_result.success,
-                "validationStatus": pipeline_result.validation_status,
-                "writebackSuccess": pipeline_result.writeback_success,
-            },
+            # -- Read previous element state (Cosmos DB) -------------------
+            # Domain contract: any Cosmos failure → default REPROCESS.
+            previous_state: Optional[str] = None
+            if state_store is not None:
+                try:
+                    previous_item = state_store.get_state(
+                        asset_id=element_id,
+                        entity_type=element.element_type,
+                    )
+                    if previous_item is not None:
+                        previous_state = previous_item.get("contentHash")
+                        logger.info(
+                            "Previous element state loaded",
+                            extra={
+                                "correlationId": correlation_id,
+                                "elementId": element_id,
+                                "authMethod": "ManagedIdentity",
+                            },
+                        )
+                except Exception as cosmos_read_exc:
+                    logger.warning(
+                        "Cosmos state read failed for element %s — REPROCESS: %s",
+                        element_id,
+                        cosmos_read_exc,
+                        extra={
+                            "correlationId": correlation_id,
+                            "elementId": element_id,
+                            "cosmosError": type(cosmos_read_exc).__name__,
+                            "fallbackDecision": "REPROCESS",
+                        },
+                    )
+
+            # -- Domain decision -------------------------------------------
+            decision: DecisionResult = decide_reprocess_or_skip(
+                current_hash=element_hash,
+                previous_state=previous_state,
+            )
+
+            # Timestamps derived from reference_time for temporal consistency
+            now_iso: str = reference_time.isoformat()
+
+            logger.info(
+                "Element decision: %s",
+                decision.value,
+                extra={
+                    "correlationId": correlation_id,
+                    "elementId": element_id,
+                    "elementName": element.element_name,
+                    "elementType": element.element_type,
+                    "decision": decision.value,
+                    "contentHash": element_hash[:16] + "...",
+                },
+            )
+
+            element_decisions.append(decision.value)
+
+            if decision == DecisionResult.SKIP:
+                # SKIP: element unchanged — write schema-compliant state + audit.
+                if state_store is not None:
+                    state_store.upsert_state({
+                        "id": element_id,
+                        "entityType": element.element_type,
+                        "sourceSystem": element.source_system,
+                        "contentHash": element_hash,
+                        "lastProcessed": now_iso,
+                    })
+                    state_store.upsert_audit({
+                        "id": f"orch:{element_id}:{correlation_id}",
+                        "entityType": element.element_type,
+                        "assetId": element_id,
+                        "sourceSystem": element.source_system,
+                        "decision": decision.value,
+                        "contentHash": element_hash,
+                        "correlationId": correlation_id,
+                        "processedAt": now_iso,
+                        "recordType": "orchestrator_decision",
+                    })
+                element_successes.append(True)
+
+            else:
+                # REPROCESS: element new or changed — invoke enrichment pipeline.
+                # Write orchestrator decision audit before handing off.
+                # Element state is written by the pipeline AFTER writeback.
+                if state_store is not None:
+                    state_store.upsert_audit({
+                        "id": f"orch:{element_id}:{correlation_id}",
+                        "entityType": element.element_type,
+                        "assetId": element_id,
+                        "sourceSystem": element.source_system,
+                        "decision": decision.value,
+                        "contentHash": element_hash,
+                        "correlationId": correlation_id,
+                        "processedAt": now_iso,
+                        "recordType": "orchestrator_decision",
+                    })
+
+                logger.info(
+                    "REPROCESS — invoking enrichment pipeline for element",
+                    extra={
+                        "correlationId": correlation_id,
+                        "elementId": element_id,
+                        "elementName": element.element_name,
+                    },
+                )
+
+                pipeline_result = run_enrichment_pipeline(
+                    asset=element.raw_payload,
+                    asset_id=element_id,
+                    entity_type=element.element_type,
+                    source_system=element.source_system,
+                    element_name=element.element_name,
+                    correlation_id=correlation_id,
+                    current_hash=element_hash,
+                    state_store=state_store,
+                    reference_time=reference_time,
+                )
+
+                logger.info(
+                    "Enrichment pipeline returned for element",
+                    extra={
+                        "correlationId": correlation_id,
+                        "elementId": element_id,
+                        "pipelineSuccess": pipeline_result.success,
+                        "validationStatus": pipeline_result.validation_status,
+                        "writebackSuccess": pipeline_result.writeback_success,
+                    },
+                )
+
+                element_successes.append(pipeline_result.success)
+                if not pipeline_result.success and first_error is None:
+                    first_error = pipeline_result.error
+
+        # -- Aggregate results across all elements -------------------------
+        overall_success = all(element_successes) if element_successes else True
+        overall_decision = (
+            "REPROCESS" if "REPROCESS" in element_decisions
+            else ("SKIP" if element_decisions else None)
         )
 
         return MessageProcessingResult(
             correlation_id=correlation_id,
             asset_id=asset_id,
-            decision=decision.value,
-            success=pipeline_result.success,
-            error=pipeline_result.error,
+            decision=overall_decision,
+            success=overall_success,
+            error=first_error,
         )
 
     except Exception as exc:
@@ -302,3 +340,36 @@ def handle_message(
             success=False,
             error=str(exc),
         )
+
+
+def _split_asset_elements(asset: Dict[str, Any]) -> List[ContextElement]:
+    """Decompose an asset payload into ContextElement objects.
+
+    If the payload contains an 'elements' array, delegates to the domain
+    element splitter.  If there is no 'elements' key (flat asset payload),
+    wraps the whole asset as a single ContextElement — preserving backward
+    compatibility with assets that do not carry sub-elements.
+
+    Args:
+        asset: Full asset metadata dict from the Service Bus message.
+
+    Returns:
+        Ordered list of ContextElement objects, one per element.
+
+    Raises:
+        ValueError: If 'elements' is present but contains invalid entries.
+        TypeError:  If 'elements' is present but is not a list.
+    """
+    try:
+        return split_elements(asset)
+    except KeyError:
+        # No 'elements' key — treat whole asset as a single element.
+        return [
+            ContextElement(
+                source_system=asset.get("sourceSystem", "unknown"),
+                element_name=asset.get("entityName", asset.get("id", "unknown")),
+                element_type=asset.get("entityType", "unknown"),
+                description=asset.get("description", ""),
+                raw_payload=asset,
+            )
+        ]

@@ -11,6 +11,7 @@ These tests verify that the handler:
 
 import json
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from src.domain.change_detection import DecisionResult
@@ -254,3 +255,278 @@ class TestHandleMessageDeterminism:
 
         assert result1.decision == "REPROCESS"
         assert result2.decision == "REPROCESS"
+
+
+# ---- Completion Criteria Tests -----------------------------------------------
+
+
+class TestElementLevelExecution:
+    """Test 1 — Element-Level Execution (completion criterion).
+
+    An asset with N elements must produce exactly N independent pipeline
+    invocations, each with its own element identity and content hash.
+    """
+
+    def test_n_elements_produce_n_pipeline_calls(self) -> None:
+        """Asset with 3 elements → run_enrichment_pipeline called 3 times."""
+        multi_element_asset = {
+            "id": "synergy.multi.asset",
+            "sourceSystem": "synergy",
+            "elements": [
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table A",
+                    "entityType": "table",
+                    "description": "First element.",
+                },
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table B",
+                    "entityType": "table",
+                    "description": "Second element.",
+                },
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table C",
+                    "entityType": "table",
+                    "description": "Third element.",
+                },
+            ],
+        }
+
+        mock_element_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="el-id",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+
+        with patch(_PIPELINE_PATCH, return_value=mock_element_result) as mock_pipeline:
+            result = handle_message(json.dumps(multi_element_asset))
+
+        assert result.success is True
+        assert result.decision == "REPROCESS"
+        assert mock_pipeline.call_count == 3
+
+    def test_each_element_receives_same_correlation_id(self) -> None:
+        """All elements within one message share the same correlation_id."""
+        multi_element_asset = {
+            "id": "synergy.multi.asset",
+            "sourceSystem": "synergy",
+            "elements": [
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table A",
+                    "entityType": "table",
+                },
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table B",
+                    "entityType": "table",
+                },
+            ],
+        }
+
+        mock_element_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="el-id",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+
+        captured_correlation_ids = []
+
+        def capture(**kwargs):
+            captured_correlation_ids.append(kwargs.get("correlation_id"))
+            return mock_element_result
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(json.dumps(multi_element_asset))
+
+        assert len(captured_correlation_ids) == 2
+        assert captured_correlation_ids[0] == captured_correlation_ids[1], (
+            "All elements in one message must share the same correlation_id"
+        )
+
+
+class TestDeterministicReferenceTime:
+    """Test 2 — Deterministic Reference Time (completion criterion).
+
+    reference_time is generated once per message and propagated to every
+    element pipeline call.  All elements within a single message share the
+    same temporal context so retries are deterministic.
+    """
+
+    def test_reference_time_propagated_to_pipeline(self) -> None:
+        """run_enrichment_pipeline must receive reference_time kwarg."""
+        mock_element_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="el-id",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+
+        captured_times = []
+
+        def capture(**kwargs):
+            captured_times.append(kwargs.get("reference_time"))
+            return mock_element_result
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(json.dumps(VALID_ASSET))
+
+        assert len(captured_times) == 1
+        from datetime import datetime
+        assert isinstance(captured_times[0], datetime), (
+            "reference_time must be a datetime object"
+        )
+
+    def test_all_elements_share_same_reference_time(self) -> None:
+        """All elements within one message receive the identical reference_time."""
+        multi_element_asset = {
+            "id": "synergy.multi.asset",
+            "sourceSystem": "synergy",
+            "elements": [
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table A",
+                    "entityType": "table",
+                },
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table B",
+                    "entityType": "table",
+                },
+                {
+                    "sourceSystem": "synergy",
+                    "entityName": "Table C",
+                    "entityType": "table",
+                },
+            ],
+        }
+
+        mock_element_result = EnrichmentPipelineResult(
+            success=True,
+            asset_id="el-id",
+            correlation_id="mock-corr",
+            validation_status="PASS",
+            writeback_success=True,
+        )
+
+        captured_times = []
+
+        def capture(**kwargs):
+            captured_times.append(kwargs.get("reference_time"))
+            return mock_element_result
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(json.dumps(multi_element_asset))
+
+        assert len(captured_times) == 3
+        assert captured_times[0] == captured_times[1] == captured_times[2], (
+            "All elements within one message must receive the same reference_time"
+        )
+
+
+class TestRetryDeterminism:
+    """Tests verifying that reference_time is stable across Service Bus retries.
+
+    When the consumer derives reference_time from ServiceBusMessage.enqueued_time_utc
+    and passes it to handle_message(), the same physical message produces the same
+    reference_time on every delivery attempt — making RAG freshness scoring
+    deterministic across retries.
+    """
+
+    def test_handle_message_accepts_reference_time_parameter(self) -> None:
+        """handle_message must accept and propagate an externally supplied reference_time."""
+        fixed_time = datetime(2026, 3, 7, 12, 0, 0, tzinfo=timezone.utc)
+        body = json.dumps(VALID_ASSET)
+
+        captured_times = []
+
+        def capture(**kwargs):
+            captured_times.append(kwargs.get("reference_time"))
+            return _MOCK_PIPELINE_SUCCESS
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(body, reference_time=fixed_time)
+
+        assert len(captured_times) == 1
+        assert captured_times[0] == fixed_time, (
+            "handle_message must forward the supplied reference_time to the pipeline"
+        )
+
+    def test_same_reference_time_produces_identical_pipeline_args(self) -> None:
+        """Two executions with the same reference_time produce identical pipeline call args.
+
+        This simulates two Service Bus redeliveries of the same message:
+        both receive the same enqueued_time_utc → same reference_time →
+        same RAG query parameters → deterministic enrichment.
+        """
+        fixed_time = datetime(2026, 3, 7, 12, 0, 0, tzinfo=timezone.utc)
+        body = json.dumps(VALID_ASSET)
+
+        captured_calls = []
+
+        def capture(**kwargs):
+            captured_calls.append(kwargs)
+            return _MOCK_PIPELINE_SUCCESS
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(body, reference_time=fixed_time)
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(body, reference_time=fixed_time)
+
+        assert len(captured_calls) == 2
+        assert captured_calls[0]["reference_time"] == captured_calls[1]["reference_time"], (
+            "Both retries must produce the same reference_time"
+        )
+        assert captured_calls[0]["asset_id"] == captured_calls[1]["asset_id"]
+        assert captured_calls[0]["entity_type"] == captured_calls[1]["entity_type"]
+
+    def test_different_reference_times_are_forwarded_independently(self) -> None:
+        """Different messages with different enqueue times produce different reference_times."""
+        time_a = datetime(2026, 3, 7, 10, 0, 0, tzinfo=timezone.utc)
+        time_b = datetime(2026, 3, 7, 11, 0, 0, tzinfo=timezone.utc)
+        body = json.dumps(VALID_ASSET)
+
+        captured_times = []
+
+        def capture(**kwargs):
+            captured_times.append(kwargs.get("reference_time"))
+            return _MOCK_PIPELINE_SUCCESS
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(body, reference_time=time_a)
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(body, reference_time=time_b)
+
+        assert captured_times[0] == time_a
+        assert captured_times[1] == time_b
+        assert captured_times[0] != captured_times[1]
+
+    def test_fallback_when_reference_time_not_provided(self) -> None:
+        """When reference_time is not supplied (test mode), handler falls back to datetime.now()."""
+        body = json.dumps(VALID_ASSET)
+
+        captured_times = []
+
+        def capture(**kwargs):
+            captured_times.append(kwargs.get("reference_time"))
+            return _MOCK_PIPELINE_SUCCESS
+
+        with patch(_PIPELINE_PATCH, side_effect=capture):
+            handle_message(body)
+
+        assert len(captured_times) == 1
+        assert isinstance(captured_times[0], datetime), (
+            "Fallback reference_time must be a datetime object"
+        )
+        assert captured_times[0].tzinfo is not None, (
+            "Fallback reference_time must be timezone-aware"
+        )

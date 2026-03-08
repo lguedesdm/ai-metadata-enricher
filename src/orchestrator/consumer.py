@@ -28,7 +28,8 @@ import logging
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Callable
+from datetime import datetime, timezone
+from typing import Callable, Optional
 
 from azure.identity import DefaultAzureCredential
 from azure.servicebus import ServiceBusClient, ServiceBusReceiveMode
@@ -91,6 +92,7 @@ class ServiceBusConsumer:
         body: str,
         timeout_seconds: int,
         state_store: "CosmosStateStore | None" = None,
+        reference_time: "Optional[datetime]" = None,
     ) -> "tuple[object | None, bool]":
         """
         Run handle_message in a thread with a timeout.
@@ -101,7 +103,7 @@ class ServiceBusConsumer:
         """
         with ThreadPoolExecutor(max_workers=1) as executor:
             future: Future = executor.submit(
-                handle_message, body, state_store,
+                handle_message, body, state_store, reference_time,
             )
             try:
                 result = future.result(timeout=timeout_seconds)
@@ -185,10 +187,20 @@ class ServiceBusConsumer:
                     try:
                         body = str(message)
 
+                        # Derive reference_time from the message enqueue
+                        # timestamp — stable across all redeliveries of the
+                        # same message.  Falls back to now() only if the SDK
+                        # returns None (should not occur for received messages).
+                        enqueued_time: datetime = (
+                            message.enqueued_time_utc
+                            or datetime.now(timezone.utc)
+                        )
+
                         result, timed_out = self._process_with_timeout(
                             body,
                             self._config.message_timeout_seconds,
                             state_store=self._state_store,
+                            reference_time=enqueued_time,
                         )
 
                         if timed_out:

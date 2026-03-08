@@ -89,6 +89,7 @@ def run_enrichment_pipeline(
     correlation_id: str,
     current_hash: str,
     state_store: Optional["CosmosStateStore"] = None,
+    reference_time: Optional[datetime] = None,
 ) -> EnrichmentPipelineResult:
     """Execute the complete enrichment pipeline for a single asset.
 
@@ -100,6 +101,8 @@ def run_enrichment_pipeline(
       - Same inputs → same execution path → same Purview write
       - LLM is invoked at exactly one code site (Step 3)
       - No loops, no retries, no conditional second LLM calls
+      - reference_time is propagated to RAG so retries use the same
+        temporal context and produce the same ranked context chunks
 
     Args:
         asset:          Full asset metadata dictionary (from Service Bus payload).
@@ -113,10 +116,20 @@ def run_enrichment_pipeline(
                         after successful Purview writeback.
         state_store:    CosmosStateStore instance (Managed Identity).
                         If None, state/audit persistence is skipped (test mode).
+        reference_time: Fixed reference time for deterministic RAG freshness
+                        scoring.  Generated once by the orchestrator and
+                        propagated here so retries use the same temporal
+                        context.  Defaults to datetime.now(utc) if not provided.
 
     Returns:
         EnrichmentPipelineResult describing the pipeline outcome.
     """
+    # Establish reference time once — used for RAG freshness and state timestamp.
+    # The orchestrator passes this in so all elements in a message share the
+    # same temporal context across retries.
+    if reference_time is None:
+        reference_time = datetime.now(timezone.utc)
+
     log_extra: Dict[str, Any] = {
         "correlationId": correlation_id,
         "assetId": asset_id,
@@ -139,6 +152,7 @@ def run_enrichment_pipeline(
                 source_system=source_system,
                 element_name=element_name,
                 correlation_id=correlation_id,
+                reference_time=reference_time,
             )
         finally:
             rag_pipeline.close()
@@ -199,12 +213,17 @@ def run_enrichment_pipeline(
     # STEP 3 — LLM Invocation [EXACTLY ONE CALL PER ASSET]
     # ------------------------------------------------------------------
     deployment_name = _get_deployment_name()
+    execution_duration_ms: int = 0
+    _llm_start = datetime.now(timezone.utc)
     try:
         llm_client = _build_llm_client()
         try:
             raw_output: str = llm_client.complete(messages=messages)
         finally:
             llm_client.close()
+        execution_duration_ms = int(
+            (datetime.now(timezone.utc) - _llm_start).total_seconds() * 1000
+        )
 
         logger.info(
             "LLM invocation complete — one call executed",
@@ -212,9 +231,13 @@ def run_enrichment_pipeline(
                 **log_extra,
                 "deployment": deployment_name,
                 "rawOutputLength": len(raw_output),
+                "executionDurationMs": execution_duration_ms,
             },
         )
     except Exception as exc:
+        execution_duration_ms = int(
+            (datetime.now(timezone.utc) - _llm_start).total_seconds() * 1000
+        )
         error_msg = f"LLM invocation failed: {type(exc).__name__}: {exc}"
         logger.error(error_msg, extra=log_extra, exc_info=True)
         _write_pipeline_audit(
@@ -230,6 +253,7 @@ def run_enrichment_pipeline(
             writeback_success=False,
             model=deployment_name,
             error=error_msg,
+            execution_duration_ms=execution_duration_ms,
         )
         return EnrichmentPipelineResult(
             success=False,
@@ -464,9 +488,7 @@ def run_enrichment_pipeline(
                 "entityType": entity_type,
                 "sourceSystem": source_system,
                 "contentHash": current_hash,
-                "decision": "REPROCESS",
-                "correlationId": correlation_id,
-                "updatedAt": now_iso,
+                "lastProcessed": now_iso,
             })
             logger.info(
                 "State updated after successful writeback",
@@ -519,6 +541,7 @@ def run_enrichment_pipeline(
         writeback_success=True,
         model=deployment_name,
         advisory_flag_count=len(validation_result.advisory_flags),
+        execution_duration_ms=execution_duration_ms,
     )
 
     logger.info(
@@ -660,6 +683,7 @@ def _write_pipeline_audit(
     error: Optional[str] = None,
     blocking_errors: Optional[list] = None,
     advisory_flag_count: int = 0,
+    execution_duration_ms: int = 0,
 ) -> None:
     """Write a pipeline audit record to Cosmos DB.
 
@@ -688,6 +712,7 @@ def _write_pipeline_audit(
         "writebackSuccess": writeback_success,
         "model": model,
         "tokenUsage": 0,
+        "executionDurationMs": execution_duration_ms,
         "advisoryFlagCount": advisory_flag_count,
         "recordType": "enrichment_audit",
         "processedAt": now_iso,
