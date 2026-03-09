@@ -24,7 +24,7 @@
 //     --parameters \
 //       containerAppsEnvironmentName=cae-ai-metadata-dev \
 //       containerImage=<acr>.azurecr.io/ai-metadata-orchestrator:dev \
-//       serviceBusNamespace=sb-ai-metadata-dev.servicebus.windows.net \
+//       serviceBusNamespace=ai-metadata-dev-sbus.servicebus.windows.net \
 //       appInsightsConnectionString=<connection-string>
 //
 // Post-deploy:
@@ -56,11 +56,11 @@ param containerAppsEnvironmentName string = 'cae-ai-metadata-${environment}'
 @description('Container image reference (e.g. myacr.azurecr.io/ai-metadata-orchestrator:dev).')
 param containerImage string
 
-@description('Fully qualified Service Bus namespace (e.g. sb-ai-metadata-dev.servicebus.windows.net).')
+@description('Fully qualified Service Bus namespace (e.g. ai-metadata-dev-sbus.servicebus.windows.net).')
 param serviceBusNamespace string
 
 @description('Service Bus queue name to consume from.')
-param serviceBusQueueName string = 'metadata-ingestion'
+param serviceBusQueueName string = 'enrichment-requests'
 
 @description('Application Insights connection string for telemetry.')
 @secure()

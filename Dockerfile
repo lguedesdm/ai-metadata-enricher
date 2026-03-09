@@ -9,8 +9,8 @@
 #
 # Run (local testing with env vars):
 #   docker run --rm \
-#     -e SERVICE_BUS_NAMESPACE=sb-ai-metadata-dev.servicebus.windows.net \
-#     -e SERVICE_BUS_QUEUE_NAME=metadata-ingestion \
+#     -e SERVICE_BUS_NAMESPACE=ai-metadata-dev-sbus.servicebus.windows.net \
+#     -e SERVICE_BUS_QUEUE_NAME=enrichment-requests \
 #     -e APPLICATIONINSIGHTS_CONNECTION_STRING=<conn-string> \
 #     ai-metadata-orchestrator:dev
 # =============================================================================

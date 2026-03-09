@@ -45,14 +45,14 @@ class TestOrchestratorConfig:
             OrchestratorConfig()
 
     def test_default_queue_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Default queue name should be 'metadata-ingestion'."""
+        """Default queue name should be 'enrichment-requests'."""
         monkeypatch.setenv("SERVICE_BUS_NAMESPACE", "sb-test.servicebus.windows.net")
         monkeypatch.setenv("COSMOS_ENDPOINT", "https://cosmos-test.documents.azure.com:443/")
         monkeypatch.delenv("SERVICE_BUS_QUEUE_NAME", raising=False)
 
         config = OrchestratorConfig()
 
-        assert config.service_bus_queue_name == "metadata-ingestion"
+        assert config.service_bus_queue_name == "enrichment-requests"
 
     def test_custom_queue_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Custom queue name should be read from env."""
@@ -117,4 +117,4 @@ class TestOrchestratorConfig:
         config_repr = repr(config)
 
         assert "sb-test.servicebus.windows.net" in config_repr
-        assert "metadata-ingestion" in config_repr
+        assert "enrichment-requests" in config_repr

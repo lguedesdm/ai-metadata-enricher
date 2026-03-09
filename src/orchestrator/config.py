@@ -15,12 +15,12 @@ class OrchestratorConfig:
         # -----------------------------------------------------------------
         # Azure Service Bus
         # -----------------------------------------------------------------
-        # Fully qualified namespace, e.g. "sb-ai-metadata-dev.servicebus.windows.net"
+        # Fully qualified namespace, e.g. "ai-metadata-dev-sbus.servicebus.windows.net"
         self.service_bus_namespace: str = os.environ["SERVICE_BUS_NAMESPACE"]
 
         # Queue name to consume from
         self.service_bus_queue_name: str = os.environ.get(
-            "SERVICE_BUS_QUEUE_NAME", "metadata-ingestion"
+            "SERVICE_BUS_QUEUE_NAME", "enrichment-requests"
         )
 
         # Maximum time (seconds) to wait for a message before looping
