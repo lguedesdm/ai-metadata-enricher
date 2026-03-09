@@ -294,6 +294,48 @@ def validate_llm_output(
         )
 
     # ------------------------------------------------------------------
+    # Phase 1.5: V040 — Insufficient Context Confidence (blocking)
+    #
+    # The prompt contract instructs the LLM to set confidence='low' when
+    # context is insufficient.  V040 converts that signal into a hard
+    # block: if the model itself declares it lacked grounding, the output
+    # must not proceed to Purview writeback.
+    #
+    # A001 (advisory) remains unchanged — it flags low confidence for
+    # human-review prioritisation on the PASS path.  V040 never reaches
+    # Phase 2, so A001 is logically unreachable on a low-confidence
+    # output, which is the correct behaviour: blocked outputs do not
+    # generate advisory flags (enforced by RuntimeValidationResult).
+    # ------------------------------------------------------------------
+    parsed_phase1, _ = _parse_yaml_subset(raw_output)
+    if parsed_phase1.get("confidence") == "low":
+        v040_error = (
+            "V040: LLM output confidence is 'low' — output is insufficiently "
+            "grounded in retrieved context and is blocked from Purview writeback."
+        )
+        blocking_errors.append(v040_error)
+
+        logger.warning(
+            "Runtime validation BLOCKED — V040 Insufficient Context Confidence",
+            extra={
+                **log_extra,
+                "validationStatus": "BLOCK",
+                "failureType": "grounding",
+                "ruleId": "V040",
+                "blockingErrors": blocking_errors,
+                "rulesExecuted": rules_executed,
+            },
+        )
+
+        return RuntimeValidationResult(
+            status=ValidationStatus.BLOCK,
+            blocking_errors=blocking_errors,
+            advisory_flags=[],
+            rules_executed=rules_executed,
+            raw_output=raw_output,
+        )
+
+    # ------------------------------------------------------------------
     # Phase 2: Advisory rules (only if blocking rules all passed)
     # ------------------------------------------------------------------
     parsed, _ = _parse_yaml_subset(raw_output)

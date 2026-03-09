@@ -165,6 +165,48 @@ def run_enrichment_pipeline(
                 "hasContext": context.has_context,
             },
         )
+
+        # ------------------------------------------------------------------
+        # GROUNDING GATE — Abort if RAG returned no context.
+        # Architecture requirement: LLM output must be grounded in retrieved
+        # context.  If the index holds no documents for this asset, invoking
+        # the LLM would produce an ungrounded description.  Abort cleanly
+        # rather than propagating a low-quality result to Purview.
+        # This is not a transient error: the same query will return the same
+        # empty result on retry, so the message is completed (not abandoned).
+        # ------------------------------------------------------------------
+        if not context.has_context:
+            error_msg = "RAG returned no context — LLM invocation skipped"
+            logger.warning(
+                "RAG context missing — pipeline aborted",
+                extra={
+                    **log_extra,
+                    "resultsUsed": context.results_used,
+                    "hasContext": False,
+                },
+            )
+            _write_pipeline_audit(
+                state_store=state_store,
+                asset_id=asset_id,
+                entity_type=entity_type,
+                source_system=source_system,
+                correlation_id=correlation_id,
+                current_hash=current_hash,
+                pipeline_step="rag_context_missing",
+                outcome="ABORTED",
+                validation_status="NO_CONTEXT",
+                writeback_success=False,
+                error=error_msg,
+            )
+            return EnrichmentPipelineResult(
+                success=True,
+                asset_id=asset_id,
+                correlation_id=correlation_id,
+                validation_status="NO_CONTEXT",
+                writeback_success=False,
+                error=error_msg,
+            )
+
     except Exception as exc:
         error_msg = f"RAG retrieval failed: {type(exc).__name__}: {exc}"
         logger.error(error_msg, extra=log_extra, exc_info=True)

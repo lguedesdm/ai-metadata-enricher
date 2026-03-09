@@ -31,9 +31,12 @@ class OrchestratorConfig:
         # -----------------------------------------------------------------
         # Batching & Lock Management
         # -----------------------------------------------------------------
-        # Maximum number of messages to receive per batch
+        # Maximum number of messages to receive per batch.
+        # Default is 1 — safe default for deterministic E2E validation
+        # (Phase 3 requires exactly one asset per run).
+        # Override via BATCH_SIZE env var for higher-throughput environments.
         self.batch_size: int = int(
-            os.environ.get("BATCH_SIZE", "5")
+            os.environ.get("BATCH_SIZE", "1")
         )
 
         # Interval (seconds) between lock renewal attempts
