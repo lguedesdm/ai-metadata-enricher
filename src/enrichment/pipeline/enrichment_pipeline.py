@@ -214,13 +214,20 @@ def run_enrichment_pipeline(
     # ------------------------------------------------------------------
     deployment_name = _get_deployment_name()
     execution_duration_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
     _llm_start = datetime.now(timezone.utc)
     try:
         llm_client = _build_llm_client()
         try:
-            raw_output: str = llm_client.complete(messages=messages)
+            llm_result = llm_client.complete(messages=messages)
         finally:
             llm_client.close()
+        raw_output: str = llm_result.text
+        prompt_tokens = llm_result.prompt_tokens
+        completion_tokens = llm_result.completion_tokens
+        total_tokens = llm_result.total_tokens
         execution_duration_ms = int(
             (datetime.now(timezone.utc) - _llm_start).total_seconds() * 1000
         )
@@ -232,6 +239,9 @@ def run_enrichment_pipeline(
                 "deployment": deployment_name,
                 "rawOutputLength": len(raw_output),
                 "executionDurationMs": execution_duration_ms,
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+                "totalTokens": total_tokens,
             },
         )
     except Exception as exc:
@@ -296,6 +306,9 @@ def run_enrichment_pipeline(
             writeback_success=False,
             model=deployment_name,
             blocking_errors=validation_result.blocking_errors,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
         # Return success=True: validation BLOCK is not a transient error.
         # The message is complete — retrying immediately would produce the same
@@ -338,6 +351,9 @@ def run_enrichment_pipeline(
             writeback_success=False,
             model=deployment_name,
             error=error_msg,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
         return EnrichmentPipelineResult(
             success=False,
@@ -428,6 +444,9 @@ def run_enrichment_pipeline(
             writeback_success=False,
             model=deployment_name,
             error=error_msg,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
         return EnrichmentPipelineResult(
             success=False,
@@ -457,6 +476,9 @@ def run_enrichment_pipeline(
             writeback_success=False,
             model=deployment_name,
             error=error_msg,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
         return EnrichmentPipelineResult(
             success=False,
@@ -515,6 +537,9 @@ def run_enrichment_pipeline(
                 writeback_success=True,
                 model=deployment_name,
                 error=error_msg,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
             )
             return EnrichmentPipelineResult(
                 success=False,
@@ -542,6 +567,9 @@ def run_enrichment_pipeline(
         model=deployment_name,
         advisory_flag_count=len(validation_result.advisory_flags),
         execution_duration_ms=execution_duration_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
     )
 
     logger.info(
@@ -684,12 +712,17 @@ def _write_pipeline_audit(
     blocking_errors: Optional[list] = None,
     advisory_flag_count: int = 0,
     execution_duration_ms: int = 0,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
 ) -> None:
     """Write a pipeline audit record to Cosmos DB.
 
     Audit records always include correlation_id for end-to-end traceability.
-    The token_usage field is 0 because AzureOpenAIClient.complete() returns
-    only the response string — token counts are logged by the client itself.
+    Token usage is captured from the LLMCompletionResult returned by
+    AzureOpenAIClient.complete(). Defaults to 0 for pipeline steps that
+    precede the LLM call (e.g. rag_retrieval failure) or when the API
+    does not return usage data.
 
     This function is best-effort: failures are logged but not re-raised.
     """
@@ -711,7 +744,10 @@ def _write_pipeline_audit(
         "validationStatus": validation_status,
         "writebackSuccess": writeback_success,
         "model": model,
-        "tokenUsage": 0,
+        "promptTokens": prompt_tokens,
+        "completionTokens": completion_tokens,
+        "totalTokens": total_tokens,
+        "tokenUsage": total_tokens,        # backwards compatibility alias
         "executionDurationMs": execution_duration_ms,
         "advisoryFlagCount": advisory_flag_count,
         "recordType": "enrichment_audit",

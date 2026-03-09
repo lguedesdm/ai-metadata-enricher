@@ -29,6 +29,7 @@ from src.enrichment.pipeline.enrichment_pipeline import (
     EnrichmentPipelineResult,
     run_enrichment_pipeline,
 )
+from src.enrichment.llm_client import LLMCompletionResult
 from src.orchestrator.message_handler import handle_message, MessageProcessingResult
 from src.domain.change_detection import DecisionResult
 
@@ -60,6 +61,20 @@ warnings: []
 """
 
 INVALID_LLM_OUTPUT = "This is just some free text that is not valid YAML output."
+
+# LLMCompletionResult wrappers used by all mock LLM client setups.
+VALID_LLM_RESULT = LLMCompletionResult(
+    text=VALID_LLM_OUTPUT,
+    prompt_tokens=120,
+    completion_tokens=45,
+    total_tokens=165,
+)
+INVALID_LLM_RESULT = LLMCompletionResult(
+    text=INVALID_LLM_OUTPUT,
+    prompt_tokens=80,
+    completion_tokens=10,
+    total_tokens=90,
+)
 
 CORRELATION_ID = "test-correlation-id-00000001"
 ASSET_ID = VALID_ASSET["id"]
@@ -156,7 +171,7 @@ class TestSingleAssetExecution:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -209,7 +224,7 @@ class TestSingleAssetExecution:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -259,7 +274,7 @@ class TestRAGContextRetrieval:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -349,7 +364,7 @@ class TestRAGContextRetrieval:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -477,7 +492,7 @@ class TestValidationEnforcement:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = INVALID_LLM_OUTPUT
+        mock_llm.complete.return_value = INVALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -521,7 +536,7 @@ class TestValidationEnforcement:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = INVALID_LLM_OUTPUT
+        mock_llm.complete.return_value = INVALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_build_purview.return_value = MagicMock()
@@ -573,7 +588,7 @@ class TestValidationEnforcement:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = INVALID_LLM_OUTPUT
+        mock_llm.complete.return_value = INVALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_build_purview.return_value = MagicMock()
@@ -617,7 +632,7 @@ class TestPurviewSafety:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -679,7 +694,7 @@ class TestPurviewSafety:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -738,7 +753,7 @@ class TestStatePersistence:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -797,7 +812,7 @@ class TestStatePersistence:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -839,7 +854,7 @@ class TestStatePersistence:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = INVALID_LLM_OUTPUT
+        mock_llm.complete.return_value = INVALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_build_purview.return_value = MagicMock()
@@ -875,7 +890,7 @@ class TestStatePersistence:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -941,7 +956,7 @@ class TestIdempotency:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -991,7 +1006,7 @@ class TestIdempotency:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -1039,7 +1054,7 @@ class TestIdempotency:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -1082,7 +1097,7 @@ class TestIdempotency:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -1146,7 +1161,7 @@ class TestAuditTraceability:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -1215,7 +1230,7 @@ class TestAuditTraceability:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -1432,7 +1447,7 @@ class TestStateSchemaCompliance:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()
@@ -1555,7 +1570,7 @@ class TestExecutionDurationAudit:
         mock_build_rag.return_value = mock_rag
 
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = VALID_LLM_OUTPUT
+        mock_llm.complete.return_value = VALID_LLM_RESULT
         mock_build_llm.return_value = mock_llm
 
         mock_purview = MagicMock()

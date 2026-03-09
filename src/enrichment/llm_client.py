@@ -27,6 +27,7 @@ Usage (manual / validation only):
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -35,6 +36,26 @@ from openai import AzureOpenAI
 from .config import EnrichmentConfig
 
 logger = logging.getLogger("enrichment.llm_client")
+
+
+@dataclass(frozen=True)
+class LLMCompletionResult:
+    """Structured result from a single Azure OpenAI chat completion.
+
+    Carries both the generated text and the token usage reported by the API.
+    If Azure OpenAI does not return usage data, all token counts default to 0.
+
+    Attributes:
+        text:               The model's response content.
+        prompt_tokens:      Tokens consumed by the prompt (0 if unavailable).
+        completion_tokens:  Tokens in the model's reply (0 if unavailable).
+        total_tokens:       Sum of prompt and completion tokens (0 if unavailable).
+    """
+
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
 
 
 class AzureOpenAIClient:
@@ -83,7 +104,7 @@ class AzureOpenAIClient:
         prompt: str,
         system_message: Optional[str] = None,
         messages: Optional[List[Dict[str, str]]] = None,
-    ) -> str:
+    ) -> LLMCompletionResult:
         """
         Perform a single chat completion call.
 
@@ -98,7 +119,8 @@ class AzureOpenAIClient:
                       signature.
 
         Returns:
-            The model's response text.
+            LLMCompletionResult containing the response text and token usage.
+            Token counts default to 0 if the API does not return usage data.
         """
         if messages is not None:
             # Caller provided an explicit message list — use as-is.
@@ -122,18 +144,32 @@ class AzureOpenAIClient:
             messages=chat_messages,
         )
 
-        result = response.choices[0].message.content or ""
+        text = response.choices[0].message.content or ""
+
+        # Extract token usage — default to 0 if Azure OpenAI omits the field.
+        usage = response.usage
+        prompt_tokens = usage.prompt_tokens if usage is not None else 0
+        completion_tokens = usage.completion_tokens if usage is not None else 0
+        total_tokens = usage.total_tokens if usage is not None else 0
 
         logger.info(
             "Chat completion received",
             extra={
                 "deployment": self._deployment_name,
-                "responseLength": len(result),
+                "responseLength": len(text),
                 "finishReason": response.choices[0].finish_reason,
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+                "totalTokens": total_tokens,
             },
         )
 
-        return result
+        return LLMCompletionResult(
+            text=text,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
 
     def close(self) -> None:
         """Release underlying HTTP resources."""
