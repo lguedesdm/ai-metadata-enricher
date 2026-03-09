@@ -1,0 +1,228 @@
+architectureVersion: 1.0
+system: ai-metadata-enricher
+
+sourceDocuments:
+  primaryArchitecture: "LLM Metadata Architecture Document v1"
+  runtimeInventory: "Agent Runtime Architecture Inventory"
+  infraInventory: "Agent Infrastructure Verification Report"
+
+principles:
+  - event_driven_processing
+  - rag_grounded_generation
+  - deterministic_enrichment
+  - human_governed_metadata
+  - managed_identity_authentication
+
+environments:
+  - dev
+  - test
+  - prod
+
+---
+
+messaging:
+
+  serviceBusNamespace:
+    pattern: "{project}-{environment}-sbus"
+
+  queues:
+
+    enrichment_requests:
+      name: enrichment-requests
+      purpose: "Primary enrichment job queue"
+      producer: upstream_event_pipeline
+      consumer: orchestrator
+      mode: PEEK_LOCK
+      ttl: P7D
+      maxDeliveryCount: 10
+      lockDuration: PT5M
+
+    purview_events:
+      name: purview-events
+      purpose: "Telemetry/event routing queue"
+      producer: purview_bridge
+      consumer: upstream_router
+      ttl: P7D
+      maxDeliveryCount: 10
+
+  deadLetterPolicy:
+    enabled: true
+    destination: "$DeadLetterQueue"
+
+---
+
+event_pipeline:
+
+  purview:
+    eventType: Microsoft.Purview.ScanCompleted
+
+  eventGrid:
+    routingTarget: service_bus_topic
+
+  serviceBusTopic:
+    routingQueue: enrichment-requests
+
+  bridgeComponent:
+    purpose: transform_purview_events
+    status: optional_external_component
+
+---
+
+compute:
+
+  orchestrator:
+
+    platform: Azure Container Apps
+    role: central orchestration engine
+
+    responsibilities:
+      - consume_service_bus_messages
+      - retrieve_context_from_ai_search
+      - generate_llm_descriptions
+      - validate_outputs
+      - writeback_to_purview
+      - update_state_store
+      - record_audit_events
+
+---
+
+rag:
+
+  searchService:
+    type: Azure AI Search
+
+  primaryIndex:
+    name: metadata-context-index
+
+  indexFields:
+    - id
+    - source
+    - content
+    - contentVector
+    - elementName
+    - elementType
+    - description
+    - cedsLink
+    - sourceSystem
+    - lastUpdated
+
+  retrievalStrategy:
+    type: hybrid_search
+    components:
+      - semantic_vector_search
+      - keyword_search
+      - hybrid_reranking
+
+---
+
+llm:
+
+  provider: Azure OpenAI
+
+  defaultModel: gpt-4.x
+  temperature: 0.1
+  maxTokens: 1024
+
+  invocationRules:
+    max_calls_per_asset: 1
+    rag_required: true
+    validation_required: true
+
+---
+
+state_store:
+
+  database: metadata_enricher
+
+  containers:
+
+    state:
+      purpose: asset_state_and_hash
+      partitionKey: asset_type
+
+    audit:
+      purpose: pipeline_execution_audit
+
+---
+
+purview:
+
+  integration:
+    protocol: REST (Apache Atlas API)
+
+  operations:
+    read_metadata: GET
+    write_suggestion: PATCH
+
+  writebackPolicy:
+    allowed_field: Suggested Description
+    official_description: human_approval_required
+
+---
+
+storage:
+
+  blobStorage:
+
+    containers:
+
+      synergy:
+        purpose: synergy_data_dictionary_exports
+
+      zipline:
+        purpose: zipline_metadata_exports
+
+      documentation:
+        purpose: contextual_documents
+
+      schemas:
+        purpose: metadata_schemas
+
+---
+
+security:
+
+  authentication: managed_identity
+
+  allowed_connections:
+
+    orchestrator_to_service_bus: MI
+    orchestrator_to_cosmos: MI
+    orchestrator_to_openai: MI
+    orchestrator_to_ai_search: MI
+    orchestrator_to_purview: MI
+
+---
+
+observability:
+
+  monitoring:
+    platform: Azure Application Insights
+
+  metrics:
+
+    - llm_token_usage
+    - enrichment_latency
+    - validation_failures
+    - purview_write_errors
+    - ai_search_errors
+
+---
+
+architecture_invariants:
+
+  rag_before_llm: true
+  validation_after_llm: true
+  single_llm_call_per_asset: true
+  official_description_never_overwritten: true
+  enrichment_skip_if_hash_matches: true
+
+---
+
+canonical_resource_names:
+
+  service_bus_queue: enrichment-requests
+  ai_search_index: metadata-context-index
+  cosmos_database: metadata_enricher
+  cosmos_state_container: state
+  cosmos_audit_container: audit
