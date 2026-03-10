@@ -101,7 +101,7 @@ class AzureOpenAIClient:
 
     def complete(
         self,
-        prompt: str,
+        prompt: str = "",
         system_message: Optional[str] = None,
         messages: Optional[List[Dict[str, str]]] = None,
     ) -> LLMCompletionResult:
