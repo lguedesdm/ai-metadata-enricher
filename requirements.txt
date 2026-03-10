@@ -25,6 +25,9 @@ openai>=1.40.0,<2.0.0
 # HTTP requests for Purview Atlas REST API calls
 requests>=2.31.0,<3.0.0
 
+# YAML parsing for pipeline configuration
+PyYAML>=6.0.0,<7.0.0
+
 # =============================================================================
 # RAG Query Pipeline Dependencies (isolated — not used by Orchestrator)
 # =============================================================================
