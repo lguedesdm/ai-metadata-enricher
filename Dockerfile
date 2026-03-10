@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # -- Application code -------------------------------------------------------
 COPY src/ ./src/
 
+# -- Frozen contracts (prompt templates, validation rules, schemas) ----------
+COPY contracts/ ./contracts/
+
 # -- Health check (process liveness) ----------------------------------------
 # Container Apps uses this to verify the container is alive.
 # We check that the main Python process is running.

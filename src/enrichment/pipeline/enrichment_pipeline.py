@@ -372,8 +372,10 @@ def run_enrichment_pipeline(
         },
     )
 
-    # Extract suggested_description from validated YAML output
-    suggested_description = _extract_suggested_description(raw_output)
+    # Extract suggested_description from validated YAML output.
+    # Use normalized_output (fences already stripped) so yaml.safe_load succeeds
+    # even when GPT wrapped the response in ```yaml ... ``` markdown blocks.
+    suggested_description = _extract_suggested_description(validation_result.normalized_output)
     if not suggested_description:
         error_msg = (
             "Validation passed but suggested_description could not be "

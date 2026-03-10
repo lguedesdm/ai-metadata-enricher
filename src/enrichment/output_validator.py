@@ -85,6 +85,8 @@ class RuntimeValidationResult:
             even when status is PASS — advisory flags never block.
         rules_executed: List of rule IDs that were evaluated.
         raw_output: The original LLM output string that was validated.
+        normalized_output: The LLM output after markdown fence stripping.
+            Downstream callers should use this for YAML extraction.
     """
 
     status: ValidationStatus
@@ -92,6 +94,7 @@ class RuntimeValidationResult:
     advisory_flags: List[AdvisoryFlag] = field(default_factory=list)
     rules_executed: List[str] = field(default_factory=list)
     raw_output: str = ""
+    normalized_output: str = ""
 
     def __post_init__(self) -> None:
         """Enforce internal consistency invariants.
@@ -220,6 +223,30 @@ _BLOCKING_RULE_IDS = [
 
 
 # ---------------------------------------------------------------------------
+# Markdown fence normalisation
+# ---------------------------------------------------------------------------
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Remove markdown code fences wrapping YAML output.
+
+    GPT models sometimes wrap structured output in ```yaml ... ``` blocks
+    despite instructions to output plain YAML.  This normalises the output
+    before structural validation so that valid content is not incorrectly
+    blocked by the fence characters.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        # Remove opening fence (```yaml or ```)
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1:]
+    if text.endswith("```"):
+        text = text[:text.rfind("```")].rstrip()
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -251,18 +278,23 @@ def validate_llm_output(
     if correlation_id is not None:
         log_extra["correlationId"] = correlation_id
 
+    # Strip markdown fences before validation (GPT sometimes wraps output in
+    # ```yaml ... ``` despite instructions to output plain YAML).
+    normalized = _strip_markdown_fences(raw_output)
+
     logger.info(
         "Starting runtime validation of LLM output",
         extra={
             **log_extra,
             "rawOutputLength": len(raw_output) if raw_output else 0,
+            "fencesStripped": normalized != raw_output,
         },
     )
 
     # ------------------------------------------------------------------
     # Phase 1: Blocking validation (existing Validation Engine)
     # ------------------------------------------------------------------
-    structural_result, semantic_result = validate_output(raw_output)
+    structural_result, semantic_result = validate_output(normalized)
 
     blocking_errors: List[str] = []
     blocking_errors.extend(structural_result.structural_errors)
@@ -291,6 +323,7 @@ def validate_llm_output(
             advisory_flags=[],
             rules_executed=rules_executed,
             raw_output=raw_output,
+            normalized_output=normalized,
         )
 
     # ------------------------------------------------------------------
@@ -307,7 +340,7 @@ def validate_llm_output(
     # output, which is the correct behaviour: blocked outputs do not
     # generate advisory flags (enforced by RuntimeValidationResult).
     # ------------------------------------------------------------------
-    parsed_phase1, _ = _parse_yaml_subset(raw_output)
+    parsed_phase1, _ = _parse_yaml_subset(normalized)
     if parsed_phase1.get("confidence") == "low":
         v040_error = (
             "V040: LLM output confidence is 'low' — output is insufficiently "
@@ -333,12 +366,13 @@ def validate_llm_output(
             advisory_flags=[],
             rules_executed=rules_executed,
             raw_output=raw_output,
+            normalized_output=normalized,
         )
 
     # ------------------------------------------------------------------
     # Phase 2: Advisory rules (only if blocking rules all passed)
     # ------------------------------------------------------------------
-    parsed, _ = _parse_yaml_subset(raw_output)
+    parsed, _ = _parse_yaml_subset(normalized)
     advisory_flags, advisory_rule_ids = _evaluate_advisory_rules(parsed)
     rules_executed.extend(advisory_rule_ids)
 
@@ -362,4 +396,5 @@ def validate_llm_output(
         advisory_flags=advisory_flags,
         rules_executed=rules_executed,
         raw_output=raw_output,
+        normalized_output=normalized,
     )
