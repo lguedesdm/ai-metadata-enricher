@@ -138,7 +138,7 @@ state_store:
 
     state:
       purpose: asset_state_and_hash
-      partitionKey: asset_type
+      partitionKey: entityType
 
     audit:
       purpose: pipeline_execution_audit
