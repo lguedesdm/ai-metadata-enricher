@@ -293,7 +293,7 @@ class TestSuccessfulWriteback:
         )
 
         assert result.success is True
-        # Verify only userDescription was written, not description
+        # Verify AI_Enrichment BM was written; native description never touched
         purview.write_suggested_description.assert_called_once_with(
             entity_guid=TEST_GUID,
             description=TEST_DESCRIPTION,

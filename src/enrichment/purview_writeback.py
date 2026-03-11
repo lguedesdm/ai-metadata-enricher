@@ -5,7 +5,7 @@ Provides a safe, non-destructive write-back of exactly one AI-generated
 Suggested Description to Microsoft Purview, completing the governance loop.
 
 This module:
-- Writes ONLY to the Suggested Description (userDescription) attribute
+- Writes ONLY to the AI_Enrichment Business Metadata attribute
 - Operates on exactly one asset at a time
 - Enforces a lifecycle: pending → approved / rejected
 - Prevents overwrite of non-pending or authoritative metadata
@@ -143,7 +143,7 @@ class PurviewWritebackService:
     1. Lifecycle status check (Cosmos DB)
     2. Entity existence verification (Purview read)
     3. Authoritative metadata protection
-    4. Atomic write of userDescription (Purview partial update)
+    4. Atomic write of AI_Enrichment.suggested_description (Business Metadata POST)
     5. Lifecycle state persistence (Cosmos DB)
     6. Audit record creation (Cosmos DB)
 
@@ -195,7 +195,7 @@ class PurviewWritebackService:
         1. Reads lifecycle state from Cosmos DB
         2. Blocks if existing lifecycle is approved or rejected
         3. Reads the entity from Purview to confirm existence
-        4. Writes ONLY to userDescription (Suggested Description)
+        4. Writes ONLY to AI_Enrichment.suggested_description (Business Metadata)
         5. Creates a PENDING lifecycle record in Cosmos DB
         6. Creates an audit record in Cosmos DB
 
@@ -286,14 +286,14 @@ class PurviewWritebackService:
         if authoritative_desc and authoritative_desc.strip():
             logger.info(
                 "Authoritative description exists — write-back proceeds to "
-                "userDescription only (authoritative metadata untouched)",
+                "AI_Enrichment.suggested_description only (authoritative metadata untouched)",
                 extra={
                     **log_extra,
                     "authoritativeDescriptionLength": len(authoritative_desc),
                 },
             )
 
-        # -- Step 5: Write userDescription to Purview ---------------------
+        # -- Step 5: Write AI_Enrichment Business Metadata to Purview -----
         try:
             purview_response = self._purview.write_suggested_description(
                 entity_guid=entity_guid,
@@ -334,7 +334,7 @@ class PurviewWritebackService:
         except Exception as exc:
             # PARTIAL WRITE: Purview updated, Cosmos failed.
             error_msg = (
-                f"PARTIAL WRITE: Purview userDescription was written successfully, "
+                f"PARTIAL WRITE: Purview AI_Enrichment Business Metadata was written successfully, "
                 f"but Cosmos DB lifecycle record failed: {exc}. "
                 f"Manual reconciliation required for asset '{entity_guid}'."
             )

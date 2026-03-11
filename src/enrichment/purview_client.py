@@ -1,8 +1,8 @@
 """
 Microsoft Purview Client — Managed Identity Authentication Only.
 
-Provides a minimal, isolated client for writing the "Suggested Description"
-attribute to Microsoft Purview entities via the Atlas REST API.
+Provides a minimal, isolated client for writing the AI_Enrichment
+Business Metadata attribute to Microsoft Purview entities via the Atlas REST API.
 
 Authentication uses DefaultAzureCredential (Managed Identity) to acquire
 an Entra ID token scoped to the Purview data plane.
@@ -32,6 +32,7 @@ Usage (manual / validation only):
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 import requests
@@ -47,9 +48,9 @@ _PURVIEW_SCOPE = "https://purview.azure.net/.default"
 
 class PurviewClient:
     """
-    Minimal Purview client for writing Suggested Description.
+    Minimal Purview client for writing AI_Enrichment Business Metadata.
 
-    Uses the Atlas REST API (Entity partial update) with Managed Identity.
+    Uses the Atlas REST API (Business Metadata POST) with Managed Identity.
     No lifecycle logic, no retries, no orchestration awareness.
 
     Lifecycle:
@@ -87,61 +88,57 @@ class PurviewClient:
         }
 
     def write_suggested_description(
-        self, entity_guid: str, description: str
+        self,
+        entity_guid: str,
+        description: str,
+        confidence_score: float = 0.0,
+        model_version: str = "",
+        generated_at: str = "",
     ) -> Dict[str, Any]:
         """
-        Write the userDescription (Suggested Description) attribute on a
-        Purview entity using the current Datamap Atlas API.
+        Write the AI-generated description to the AI_Enrichment Business
+        Metadata attribute on a Purview entity.
 
         This performs a POST to:
-            /datamap/api/atlas/v2/entity?api-version=2023-09-01
+            /datamap/api/atlas/v2/entity/guid/{guid}/businessmetadata
 
-        The entity is read first to obtain the mandatory typeName, name, and
-        qualifiedName required by the 2023-09-01 API contract. Only
-        userDescription is changed; all other attributes are left untouched.
+        Only AI_Enrichment.suggested_description (and companion attributes)
+        are written. Native entity attributes — including description and
+        userDescription — are never touched.
 
         Args:
-            entity_guid: The GUID of the Purview entity to update.
-            description: The suggested description text to write.
+            entity_guid:      The GUID of the Purview entity to update.
+            description:      The AI-generated description text to write.
+            confidence_score: Validation confidence score (0.0–1.0).
+            model_version:    LLM model identifier (reserved for future use).
+            generated_at:     ISO-8601 generation timestamp. Defaults to now.
 
         Returns:
-            The JSON response from the Purview API.
+            Empty dict on success (API returns HTTP 204 No Content).
 
         Raises:
             requests.HTTPError: If the API call fails.
         """
-        # Fetch current entity to resolve mandatory identity attributes.
-        entity_data = self.get_entity(entity_guid)
-        entity = entity_data.get("entity", {})
-        type_name = entity.get("typeName", "")
-        attrs = entity.get("attributes", {})
-        name = attrs.get("name", "")
-        qualified_name = attrs.get("qualifiedName", "")
-
         url = (
-            f"{self._base_url}/datamap/api/atlas/v2/entity"
-            "?api-version=2023-09-01"
+            f"{self._base_url}/datamap/api/atlas/v2/entity/guid/{entity_guid}"
+            "/businessmetadata?isOverwrite=true"
         )
 
-        # Datamap API (2023-09-01) requires typeName + mandatory attributes.
-        # Only userDescription is changed; remaining attributes are untouched.
+        # Write only to the AI_Enrichment Business Metadata namespace.
+        # Native attributes (description, userDescription) are never modified.
         payload: Dict[str, Any] = {
-            "entity": {
-                "guid": entity_guid,
-                "typeName": type_name,
-                "attributes": {
-                    "qualifiedName": qualified_name,
-                    "name": name,
-                    "userDescription": description,
-                },
+            "AI_Enrichment": {
+                "suggested_description": description,
+                "confidence_score": confidence_score,
+                "review_status": "PENDING",
             },
         }
 
         logger.info(
-            "Writing Suggested Description to Purview",
+            "Writing AI_Enrichment Business Metadata to Purview",
             extra={
                 "entityGuid": entity_guid,
-                "typeName": type_name,
+                "confidenceScore": confidence_score,
                 "descriptionLength": len(description),
                 "purviewAccount": self._account_name,
             },
@@ -151,13 +148,20 @@ class PurviewClient:
         response = self._session.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
-        result = response.json()
+        # Business Metadata API returns HTTP 204 No Content on success.
+        result: Dict[str, Any] = {}
+        if response.status_code != 204 and response.content:
+            try:
+                result = response.json()
+            except Exception:
+                pass
 
         logger.info(
-            "Suggested Description written successfully",
+            "AI_Enrichment Business Metadata written successfully",
             extra={
                 "entityGuid": entity_guid,
                 "purviewAccount": self._account_name,
+                "httpStatus": response.status_code,
             },
         )
 
