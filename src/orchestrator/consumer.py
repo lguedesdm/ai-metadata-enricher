@@ -93,6 +93,7 @@ class ServiceBusConsumer:
         timeout_seconds: int,
         state_store: "CosmosStateStore | None" = None,
         reference_time: "Optional[datetime]" = None,
+        correlation_id: "Optional[str]" = None,
     ) -> "tuple[object | None, bool]":
         """
         Run handle_message in a thread with a timeout.
@@ -103,7 +104,7 @@ class ServiceBusConsumer:
         """
         with ThreadPoolExecutor(max_workers=1) as executor:
             future: Future = executor.submit(
-                handle_message, body, state_store, reference_time,
+                handle_message, body, state_store, reference_time, correlation_id,
             )
             try:
                 result = future.result(timeout=timeout_seconds)
@@ -174,7 +175,22 @@ class ServiceBusConsumer:
 
                 # -- Process each message sequentially ------------------
                 for index, message in enumerate(messages):
-                    msg_correlation_id = str(uuid.uuid4())
+                    # Read correlationId propagated by the Router via
+                    # ApplicationProperties.  Fall back to a new UUID only for
+                    # legacy messages that pre-date correlationId support.
+                    raw_cid = (message.application_properties or {}).get("correlationId")
+                    if raw_cid:
+                        msg_correlation_id = str(raw_cid)
+                    else:
+                        msg_correlation_id = str(uuid.uuid4())
+                        logger.info(
+                            "correlationId_missing_generated",
+                            extra={
+                                "event": "correlationId_missing_generated",
+                                "correlationId": msg_correlation_id,
+                                "stage": "orchestrator",
+                            },
+                        )
 
                     renewer = LockRenewer(
                         receiver=receiver,
@@ -201,6 +217,7 @@ class ServiceBusConsumer:
                             self._config.message_timeout_seconds,
                             state_store=self._state_store,
                             reference_time=enqueued_time,
+                            correlation_id=msg_correlation_id,
                         )
 
                         if timed_out:

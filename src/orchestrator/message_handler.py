@@ -71,6 +71,7 @@ def handle_message(
     message_body: str | bytes,
     state_store: Optional["CosmosStateStore"] = None,
     reference_time: Optional[datetime] = None,
+    correlation_id: Optional[str] = None,
 ) -> MessageProcessingResult:
     """
     Process a single Service Bus message.
@@ -97,12 +98,28 @@ def handle_message(
     Returns:
         MessageProcessingResult with the decision outcome.
     """
-    correlation_id = str(uuid.uuid4())
+    # Use correlationId from the upstream pipeline (Bridge → Router → Orchestrator).
+    # Generate a fallback UUID only when the caller did not supply one.
+    if correlation_id is None:
+        correlation_id = str(uuid.uuid4())
+        logger.info(
+            "correlationId_missing_generated",
+            extra={
+                "event": "correlationId_missing_generated",
+                "correlationId": correlation_id,
+                "stage": "orchestrator",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
     logger.info(
         "Processing started",
         extra={
+            "assetId": None,
             "correlationId": correlation_id,
+            "stage": "orchestrator",
+            "event": "message_received",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "phase": "START",
         },
     )
@@ -126,8 +143,11 @@ def handle_message(
         logger.info(
             "Asset payload parsed",
             extra={
-                "correlationId": correlation_id,
                 "assetId": asset_id,
+                "correlationId": correlation_id,
+                "stage": "orchestrator",
+                "event": "metadata_fetched",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -215,12 +235,16 @@ def handle_message(
             # Timestamps derived from reference_time for temporal consistency
             now_iso: str = reference_time.isoformat()
 
+            obs_event = "hash_skipped" if decision == DecisionResult.SKIP else "hash_changed"
             logger.info(
                 "Element decision: %s",
                 decision.value,
                 extra={
+                    "assetId": element_id,
                     "correlationId": correlation_id,
-                    "elementId": element_id,
+                    "stage": "orchestrator",
+                    "event": obs_event,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "elementName": element.element_name,
                     "elementType": element.element_type,
                     "decision": decision.value,
