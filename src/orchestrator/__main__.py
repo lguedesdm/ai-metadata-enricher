@@ -27,11 +27,11 @@ from .logging_setup import configure_logging
 
 logger = logging.getLogger("orchestrator")
 
-_HEARTBEAT_INTERVAL_SECONDS = 300  # 5 minutes
+_HEARTBEAT_INTERVAL_SECONDS = 3600  # 60 minutes
 
 
 def _heartbeat_loop(stop_event: threading.Event) -> None:
-    """Background thread — emits host_alive every 5 minutes to App Insights."""
+    """Background thread — emits host_alive every 60 minutes to App Insights."""
     hb_logger = logging.getLogger("orchestrator.heartbeat")
     while not stop_event.wait(timeout=_HEARTBEAT_INTERVAL_SECONDS):
         hb_logger.info(
