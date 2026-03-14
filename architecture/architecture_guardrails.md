@@ -1,7 +1,7 @@
 # AI Metadata Enricher — Architecture Guardrails
 
 > **Status:** Immutable Engineering Constraints
-> **Version:** 1.0
+> **Version:** 1.1 (corrected — canonical flow updated to reflect real implementation, March 2026)
 > **Authority:** These guardrails are derived from the LLM Metadata Architecture Document and the Execution Plan.
 
 ---
@@ -22,8 +22,9 @@ The following documents define the system architecture and must be treated as au
 - **Execution Plan** → `architecture/execution_plan.md`
 - **Architecture Guardrails** → this file
 - **Architecture Contract** → `architecture/architecture_contract.md`
+- **Runtime Architecture** → `architecture/runtime_architecture.md`
 
-Any code implementation must remain compliant with all four documents.
+Any code implementation must remain compliant with all five documents.
 
 The architecture must be treated as frozen unless explicitly changed by the project owner.
 
@@ -33,29 +34,45 @@ The architecture must be treated as frozen unless explicitly changed by the proj
 
 The platform follows a unified RAG enrichment architecture.
 
-**Canonical flow:**
+**Canonical flow (authoritative — reflects real implementation):**
 
 ```
-Purview Scan Event
-        ↓
-Event Grid
-        ↓
-Service Bus
-        ↓
-Enrichment Orchestrator (Container App)
-        ↓
-Azure AI Search (RAG context retrieval)
-        ↓
-Azure OpenAI (description generation)
-        ↓
-Purview Suggested Description
-        ↓
-Cosmos DB (state + audit)
+Purview Scan Completion
+        │
+        ▼
+Azure Monitor Diagnostic Settings
+        │
+        ▼
+Azure Event Hub  (purview-diagnostics)
+        │
+        ▼
+HeuristicTriggerBridge  [Azure Function — C#]
+  filters scan events, attaches correlationId
+        │
+        ▼
+Service Bus Queue: purview-events
+        │
+        ▼
+UpstreamRouterFunction  [Azure Function — C#]
+  routes and transforms to enrichment request
+        │
+        ▼
+Service Bus Queue: enrichment-requests
+        │
+        ▼
+Enrichment Orchestrator  [Container App — Python]
+  ├── Cosmos DB state check (SHA-256 → SKIP or REPROCESS)
+  ├── Azure AI Search (RAG context retrieval)
+  ├── Azure OpenAI (description generation)
+  ├── Validation Engine (structural + semantic + advisory)
+  ├── Purview write-back (AI_Enrichment.suggested_description only)
+  └── Cosmos DB audit record
+        │
+        ▼
+Human Review (Purview UI — approve or reject)
 ```
 
-The orchestrator acts as the central processing engine and must mediate between Purview metadata and AI Search context retrieval.
-
-No component may bypass this flow.
+No component may bypass this flow. The Orchestrator is never called directly by Purview or by Event Grid.
 
 ---
 
@@ -67,10 +84,10 @@ No component may bypass this flow.
 **Allowed integration model:**
 
 ```
-Synergy → JSON export → Blob Storage
-Zipline → JSON export → Blob Storage
-Docs → Blob Storage
-Blob Storage → Azure AI Search index
+Synergy → JSON export → Blob Storage (/synergy/)
+Zipline → JSON export → Blob Storage (/zipline/)
+Docs    → Blob Storage (/documentation/)
+Blob Storage → Azure AI Search index (metadata-context-index)
 ```
 
 The orchestrator retrieves context only through Azure AI Search.
@@ -90,9 +107,9 @@ The solution must use a **single unified index**.
 | Field | Purpose |
 |---|---|
 | `id` | Primary key |
-| `source` | Origin of context |
+| `source` | Origin of context (synergy, zipline, documentation) |
 | `content` | Searchable text |
-| `contentVector` | Embedding vector |
+| `contentVector` | Embedding vector (1536 dimensions, HNSW) |
 | `elementName` | Metadata element |
 | `elementType` | Asset type |
 | `description` | Source description |
@@ -110,11 +127,11 @@ Context retrieval must follow a **hybrid search model**.
 
 | Retrieval Method | Purpose |
 |---|---|
-| Vector search | Semantic similarity |
-| Keyword search | Exact field names |
-| Hybrid ranking | Merged ranking |
+| Vector search (1536d, HNSW) | Semantic similarity |
+| Keyword search | Exact field names and terminology |
+| Hybrid reranking | Composite score: relevance × source_weight × freshness_factor |
 
-Ranking signals: vector relevance, keyword match, source reliability, freshness.
+Ranking signals: vector relevance, keyword match, source reliability, freshness (90-day half-life decay).
 
 The orchestrator must retrieve top N context chunks before generation.
 
@@ -129,12 +146,14 @@ Mandatory prompt components:
 | Component | Description |
 |---|---|
 | Purview metadata | Asset name, schema, fields |
-| AI Search context | Retrieved chunks |
+| AI Search context | Retrieved chunks with source attribution |
 | Documentation rules | Business definitions |
 | CEDS references | When available |
-| Output format | Structured YAML |
+| Output format | Structured YAML (mandatory) |
 
 **Free-form prompt structures are not allowed.**
+
+Prompt template is frozen at `contracts/prompts/v1-metadata-enrichment.prompt.yaml` (v1.0.0).
 
 ---
 
@@ -144,13 +163,16 @@ Default model configuration:
 
 | Parameter | Value |
 |---|---|
-| Model | GPT-4 class model |
-| Temperature | 0.0 – 0.2 |
-| Max tokens | 512–1024 |
+| Model | GPT-4.x (latest available) |
+| Temperature | 0.1 |
+| Max tokens | 1024 |
+| Calls per asset | 1 (no batching in current implementation) |
 
 The system must prioritize deterministic outputs.
 
-Responses must use structured YAML format.
+Responses must use structured YAML format as defined in `contracts/outputs/v1-metadata-enrichment.output.yaml`.
+
+> **Note on batching:** Grouping multiple assets per LLM call is a planned future optimization. It is not implemented and must not be assumed to be active.
 
 ---
 
@@ -158,14 +180,15 @@ Responses must use structured YAML format.
 
 All AI outputs must pass validation before writeback.
 
-| Validation Type | Purpose |
-|---|---|
-| Structural | Format, length |
-| Semantic | Consistency with metadata |
-| Safety | No sensitive inference |
-| Confidence scoring | Quality estimation |
+**Implementation (two-stage):**
 
-**Invalid outputs must not be written to Purview.**
+| Stage | Component | Type |
+|---|---|---|
+| 1a | `StructuralValidator` | Blocking — YAML format, required fields, types, length, confidence enum |
+| 1b | `SemanticValidator` | Blocking — forbidden phrases, grounding, source attribution, no external knowledge |
+| 2 | `OutputValidator` (runtime) | Blocking rules V001–V040 + Advisory flags A001–A005 |
+
+**Invalid outputs (BLOCK status) must not be written to Purview.** Rejection is recorded in Cosmos DB `audit`.
 
 ---
 
@@ -175,11 +198,12 @@ The system must use Purview **Suggested Description** workflow.
 
 | Rule | Description |
 |---|---|
-| AI output destination | Suggested Description only |
-| Human approval | Mandatory |
-| Official description | Updated only after approval |
+| AI output destination | `AI_Enrichment.suggested_description` only |
+| HTTP method | POST to `/datamap/api/atlas/v2/entity/guid/{guid}/businessmetadata` |
+| Human approval | Mandatory before any AI suggestion becomes official |
+| Official description | Updated only after human approval — never by the system |
 
-This guarantees human-governed metadata.
+This guarantees human-governed metadata. The AI system never writes to `entity.description`.
 
 ---
 
@@ -187,28 +211,38 @@ This guarantees human-governed metadata.
 
 State tracking must use **Cosmos DB**.
 
+**Containers:**
+
+| Container | Partition Key | TTL | Purpose |
+|---|---|---|---|
+| `state` | `entityType` | 7 days | Asset hash + lifecycle state |
+| `audit` | `entityType` | 180 days | Immutable pipeline audit trail |
+
 Mandatory change detection process:
 
 1. Retrieve asset metadata from Purview
-2. Compute SHA-256 hash
-3. Compare with stored hash
-4. Decide:
+2. Normalize metadata (exclude volatile fields: `lastUpdated`, `schemaVersion`, `scanId`, `ingestionTime`, `_*`)
+3. Compute SHA-256 hash of normalized, sorted material fields
+4. Compare with stored hash:
 
 | Condition | Action |
 |---|---|
-| No record | Enrich |
-| Same hash | Skip |
-| Different hash | Enrich |
+| No record in Cosmos | REPROCESS (new asset) |
+| Hash matches stored | SKIP (no LLM call) |
+| Hash differs | REPROCESS (metadata changed) |
 
-This prevents redundant processing and reduces OpenAI calls.
+This prevents redundant processing and eliminates unnecessary LLM calls.
+
+> **TTL Note:** The 7-day TTL on the `state` container means assets inactive for more than 7 days will lose their stored state and be treated as new on the next enrichment trigger. This is a known architectural trade-off.
 
 ---
 
 ## 11. Security Model
 
-- All services must use **Managed Identity**.
-- No hardcoded credentials are allowed.
+- All services must use **Managed Identity** (`DefaultAzureCredential`).
+- No hardcoded credentials, connection strings, or API keys in source code.
 - RBAC must enforce least privilege across: Service Bus, Cosmos DB, Blob Storage, Azure AI Search, Purview, Azure OpenAI.
+- The Azure Functions bridge uses the same Managed Identity model.
 
 ---
 
@@ -219,9 +253,10 @@ All infrastructure must be deployed using Infrastructure as Code.
 | Allowed Tool |
 |---|
 | Bicep |
-| Terraform |
 
 **Manual Azure Portal changes are forbidden** except for break-glass recovery scenarios.
+
+The AI Search index schema is version-controlled in `infra/search/schemas/metadata-context-index.json` and deployed via Bicep deployment scripts.
 
 ---
 
@@ -231,14 +266,20 @@ Agents must **never**:
 
 | Forbidden Action |
 |---|
-| Modify AI Search schema without architecture review |
+| Modify AI Search index schema without architecture review |
 | Redesign enrichment pipeline |
 | Change RAG retrieval architecture |
 | Introduce direct API calls to Synergy or Zipline |
 | Bypass validation layer |
-| Write directly to Purview official description |
+| Write directly to Purview official description (`entity.description`) |
 | Alter Cosmos state schema |
-| Modify frozen contracts |
+| Modify frozen contracts in `/contracts/` |
+| Remove or weaken security controls |
+| Add Azure resources via Portal (IaC only) |
+| Change the canonical data flow |
+| Introduce new LLM providers without review |
+| Skip phases in the Execution Plan |
+| Remove or bypass the Azure Functions bridge components |
 
 ---
 
@@ -246,12 +287,31 @@ Agents must **never**:
 
 Agents may perform only:
 
-| Allowed Action |
-|---|
-| Bug fixes |
-| Environment configuration |
-| RBAC corrections |
-| Infrastructure provisioning |
-| Validation improvements |
+| Allowed Action | Condition |
+|---|---|
+| Bug fixes | Must not alter architecture or contracts |
+| Environment configuration | Must use IaC tooling |
+| RBAC corrections | Must follow least-privilege principle |
+| Infrastructure provisioning | Must use Bicep |
+| Validation improvements | Must not weaken existing validation rules |
+| Test additions | Must follow existing test patterns |
+| Documentation updates | Must not contradict architecture |
+| Prompt tuning | Temperature 0.0–0.2, structured YAML output only |
 
 **Architecture changes require explicit human approval.**
+
+---
+
+## 15. Azure Functions Bridge — Immutable Components
+
+The `HeuristicTriggerBridge` and `UpstreamRouterFunction` are required components of the canonical data flow.
+
+**These functions must not be:**
+- Removed or disabled without replacing the trigger ingestion path
+- Bypassed so that the Orchestrator directly consumes from Event Hub
+- Modified to write directly to `enrichment-requests` without going through `purview-events` first (unless a formal ADR approves collapsing the two-stage bridge)
+
+**The two-queue design (`purview-events` → `enrichment-requests`) is intentional:**
+- `purview-events` receives raw Purview telemetry (high volume, mixed event types)
+- `enrichment-requests` receives only validated, transformed enrichment requests
+- The separation allows independent scaling, filtering logic changes, and routing evolution without touching the Orchestrator
