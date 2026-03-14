@@ -36,8 +36,18 @@ The following rules cannot be overridden by any contributor or agent:
 
 ### 2.1 Data Flow Integrity
 
-- The canonical flow (Purview → Event Grid → Service Bus → Orchestrator → AI Search → OpenAI → Purview → Cosmos DB) must not be altered.
+- The canonical flow must not be altered:
+
+  ```
+  Purview → Azure Monitor Diagnostic Settings → Event Hub
+    → HeuristicTriggerBridge (Azure Function) → Service Bus queue: purview-events
+    → UpstreamRouterFunction (Azure Function) → Service Bus queue: enrichment-requests
+    → Enrichment Orchestrator → AI Search → Azure OpenAI → Purview (suggested_description only)
+    → Cosmos DB (state + audit)
+  ```
+
 - No component may bypass the orchestrator.
+- The Azure Functions bridge (`HeuristicTriggerBridge` + `UpstreamRouterFunction`) is a required component of this flow.
 - External systems (Synergy, Zipline) must integrate only via Blob Storage exports.
 
 ### 2.2 Single Index Rule

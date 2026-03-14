@@ -1,10 +1,18 @@
-architectureVersion: 1.0
+architectureVersion: 1.1
 system: ai-metadata-enricher
+lastUpdated: "2026-03-14"
+note: >
+  Version 1.1 — corrected to reflect audited implementation.
+  Previous version (1.0) contained incorrect event_pipeline topology
+  (described Event Grid; actual implementation uses Event Hub + Azure Functions).
+  Purview write operation corrected from PATCH to POST.
+  Cosmos DB TTL values added.
+  Temperature corrected to 0.1 (was listed as range 0.0-0.2 in architecture.md v1.0).
 
 sourceDocuments:
-  primaryArchitecture: "LLM Metadata Architecture Document v1"
-  runtimeInventory: "Agent Runtime Architecture Inventory"
-  infraInventory: "Agent Infrastructure Verification Report"
+  primaryArchitecture: "architecture/architecture.md v1.1"
+  runtimeInventory: "architecture/runtime_architecture.md v1.0"
+  infraInventory: "ai-metadata-enricher-infra/ARCHITECTURE.md"
 
 principles:
   - event_driven_processing
@@ -27,27 +35,31 @@ messaging:
 
   queues:
 
+    purview_events:
+      name: purview-events
+      purpose: "Raw Purview event routing — intermediate stage between HeuristicTriggerBridge and UpstreamRouterFunction"
+      producer: HeuristicTriggerBridge
+      consumer: UpstreamRouterFunction
+      mode: SERVICE_BUS_DEFAULT
+      ttl: P7D
+      maxDeliveryCount: 10
+      deadLetterQueue: enabled
+
     enrichment_requests:
       name: enrichment-requests
-      purpose: "Primary enrichment job queue"
-      producer: upstream_event_pipeline
+      purpose: "Canonical enrichment job queue — primary Orchestrator input"
+      producer: UpstreamRouterFunction
       consumer: orchestrator
       mode: PEEK_LOCK
       ttl: P7D
-      maxDeliveryCount: 10
       lockDuration: PT5M
-
-    purview_events:
-      name: purview-events
-      purpose: "Telemetry/event routing queue"
-      producer: purview_bridge
-      consumer: upstream_router
-      ttl: P7D
       maxDeliveryCount: 10
+      deadLetterQueue: enabled
 
   deadLetterPolicy:
     enabled: true
     destination: "$DeadLetterQueue"
+    alertOn: Application Insights
 
 ---
 
@@ -55,16 +67,40 @@ event_pipeline:
 
   purview:
     eventType: Microsoft.Purview.ScanCompleted
+    telemetryPath: Azure Monitor Diagnostic Settings
 
-  eventGrid:
-    routingTarget: service_bus_topic
+  eventHub:
+    namespace: "{project}-{environment}-evhns"
+    hub: purview-diagnostics
+    purpose: "Ingest raw Purview diagnostic telemetry"
 
-  serviceBusTopic:
-    routingQueue: enrichment-requests
+  functions_bridge:
+    runtime: Azure Functions Flex Consumption (FC1)
+    language: C# (.NET 8)
+    project: functions/purview-bridge/
 
-  bridgeComponent:
-    purpose: transform_purview_events
-    status: optional_external_component
+    HeuristicTriggerBridge:
+      trigger: EventHubTrigger
+      triggerSource: purview-diagnostics
+      output: Service Bus queue purview-events
+      responsibilities:
+        - filter_relevant_scan_events
+        - attach_correlationId
+        - forward_to_purview_events_queue
+
+    UpstreamRouterFunction:
+      trigger: ServiceBusTrigger
+      triggerSource: purview-events
+      output: Service Bus queue enrichment-requests
+      responsibilities:
+        - apply_routing_logic
+        - transform_to_canonical_enrichment_request
+        - forward_to_enrichment_requests_queue
+        - preserve_correlationId
+
+  # NOTE: Event Grid is NOT used in the current implementation.
+  # The previous v1.0 contract incorrectly described an Event Grid routing step.
+  # The actual ingestion path is: Purview → Azure Monitor → Event Hub → Functions Bridge → Service Bus.
 
 ---
 
@@ -74,15 +110,24 @@ compute:
 
     platform: Azure Container Apps
     role: central orchestration engine
+    language: Python
+    entryPoint: "python -m src.orchestrator"
+    batchSize: 1  # default for Phase 3 deterministic E2E validation
 
     responsibilities:
-      - consume_service_bus_messages
+      - consume_service_bus_messages_peek_lock
+      - element_splitting
+      - sha256_change_detection
       - retrieve_context_from_ai_search
+      - assemble_rag_prompt
       - generate_llm_descriptions
       - validate_outputs
-      - writeback_to_purview
+      - writeback_to_purview_suggested_description_only
       - update_state_store
       - record_audit_events
+
+    lockRenewalIntervalSeconds: 15
+    processingTimeoutSeconds: 120
 
 ---
 
@@ -93,40 +138,85 @@ rag:
 
   primaryIndex:
     name: metadata-context-index
+    schemaFile: "infra/search/schemas/metadata-context-index.json"
 
   indexFields:
     - id
     - source
     - content
-    - contentVector
+    - contentVector          # 1536 dimensions, HNSW algorithm
     - elementName
     - elementType
     - description
     - cedsLink
     - sourceSystem
     - lastUpdated
+    - title
+    - suggestedDescription
+    - tags
 
   retrievalStrategy:
     type: hybrid_search
     components:
-      - semantic_vector_search
-      - keyword_search
-      - hybrid_reranking
+      - semantic_vector_search   # 1536d embeddings, HNSW
+      - keyword_search           # exact field names, acronyms
+      - hybrid_reranking         # composite score: relevance × source_weight × freshness_factor
+
+  rankingFactors:
+    source_weight: configurable_per_source_system
+    freshness_halfLifeDays: 90
+    tieBreaking: document_id_ascending
+
+  sourceContainers:
+    - blob_container: synergy       # Synergy data dictionary exports
+    - blob_container: zipline       # Zipline metadata exports
+    - blob_container: documentation # Contextual documents
+    - blob_container: schemas       # Metadata schema definitions
 
 ---
 
 llm:
 
   provider: Azure OpenAI
-
   defaultModel: gpt-4.x
   temperature: 0.1
   maxTokens: 1024
+  outputFormat: structured_yaml
 
   invocationRules:
     max_calls_per_asset: 1
     rag_required: true
     validation_required: true
+    batching_implemented: false    # future optimization — not active in current implementation
+
+  promptContract: "contracts/prompts/v1-metadata-enrichment.prompt.yaml"
+  outputContract: "contracts/outputs/v1-metadata-enrichment.output.yaml"
+
+---
+
+validation:
+
+  validationContract: "contracts/validation/v1-metadata-enrichment.validation.yaml"
+
+  stages:
+    - name: StructuralValidator
+      type: blocking
+      source: "src/domain/validation/structural_validator.py"
+      rules: [V001, V002, V010, V011, V012, V020, V021]
+
+    - name: SemanticValidator
+      type: blocking
+      source: "src/domain/validation/semantic_validator.py"
+      rules: [V030, V031, V032, V040]
+
+    - name: OutputValidator
+      type: blocking_and_advisory
+      source: "src/enrichment/output_validator.py"
+      blockingRules: [V001-V040]
+      advisoryFlags: [A001, A002, A003, A004, A005]
+
+  onBlock: reject_and_audit   # write-back skipped; rejection written to Cosmos audit
+  onPass: proceed_to_writeback
 
 ---
 
@@ -139,9 +229,15 @@ state_store:
     state:
       purpose: asset_state_and_hash
       partitionKey: entityType
+      ttlSeconds: 604800      # 7 days
+      ttlNote: >
+        Assets not re-enriched within 7 days lose their stored hash.
+        On next trigger, they are treated as new (REPROCESS decision).
 
     audit:
       purpose: pipeline_execution_audit
+      partitionKey: entityType
+      ttlSeconds: 15552000    # 180 days
 
 ---
 
@@ -151,12 +247,32 @@ purview:
     protocol: REST (Apache Atlas API)
 
   operations:
-    read_metadata: GET
-    write_suggestion: PATCH
+    read_metadata:
+      method: GET
+      endpoint: "/datamap/api/atlas/v2/entity/guid/{guid}"
+
+    write_suggestion:
+      method: POST                   # NOTE: POST, not PATCH
+      endpoint: "/datamap/api/atlas/v2/entity/guid/{guid}/businessmetadata"
+      payload: |
+        {
+          "AI_Enrichment": {
+            "suggested_description": "...",
+            "confidence_score": "low|medium|high",
+            "review_status": "PENDING"
+          }
+        }
+      successStatus: 204
 
   writebackPolicy:
-    allowed_field: Suggested Description
+    allowed_field: AI_Enrichment.suggested_description
     official_description: human_approval_required
+    official_description_never_written_by_system: true
+
+  lifecycle:
+    states: [PENDING, APPROVED, REJECTED]
+    initial_state: PENDING
+    terminal_states: [APPROVED, REJECTED]
 
 ---
 
@@ -168,29 +284,36 @@ storage:
 
       synergy:
         purpose: synergy_data_dictionary_exports
+        path: /synergy/
 
       zipline:
         purpose: zipline_metadata_exports
+        path: /zipline/
 
       documentation:
         purpose: contextual_documents
+        path: /documentation/
 
       schemas:
         purpose: metadata_schemas
+        path: /schemas/
 
 ---
 
 security:
 
   authentication: managed_identity
+  credential: DefaultAzureCredential
 
-  allowed_connections:
-
-    orchestrator_to_service_bus: MI
-    orchestrator_to_cosmos: MI
-    orchestrator_to_openai: MI
-    orchestrator_to_ai_search: MI
-    orchestrator_to_purview: MI
+  rbac_assignments:
+    orchestrator_to_service_bus: Azure Service Bus Data Receiver
+    orchestrator_to_cosmos: Cosmos DB Built-in Data Contributor
+    orchestrator_to_openai: Cognitive Services OpenAI User
+    orchestrator_to_ai_search: Search Index Data Reader
+    orchestrator_to_purview: Purview Data Curator
+    functions_to_event_hub: Azure Event Hubs Data Receiver
+    functions_to_service_bus_receive: Azure Service Bus Data Receiver
+    functions_to_service_bus_send: Azure Service Bus Data Sender
 
 ---
 
@@ -199,13 +322,25 @@ observability:
   monitoring:
     platform: Azure Application Insights
 
-  metrics:
+  correlationId:
+    attached_at: HeuristicTriggerBridge
+    propagated_through:
+      - purview_events_queue
+      - UpstreamRouterFunction
+      - enrichment_requests_queue
+      - Orchestrator
+      - Cosmos DB state record
+      - Cosmos DB audit record
 
-    - llm_token_usage
-    - enrichment_latency
-    - validation_failures
-    - purview_write_errors
-    - ai_search_errors
+  metrics:
+    - llm_token_usage          # input_tokens, output_tokens, total_tokens
+    - enrichment_latency       # end-to-end per element
+    - validation_failures      # failed rule IDs
+    - purview_write_errors     # error category + HTTP status
+    - ai_search_errors         # error classification (auth, config, transient)
+    - skip_decisions           # assets skipped due to hash match
+    - dlq_messages             # dead-letter queue activity (alert)
+    - host_alive               # heartbeat every 60 minutes
 
 ---
 
@@ -216,13 +351,23 @@ architecture_invariants:
   single_llm_call_per_asset: true
   official_description_never_overwritten: true
   enrichment_skip_if_hash_matches: true
+  event_hub_is_ingestion_layer: true           # not Event Grid
+  functions_bridge_is_required: true           # HeuristicTriggerBridge + UpstreamRouterFunction
+  two_queues_not_topic_subscription: true      # purview-events + enrichment-requests
 
 ---
 
 canonical_resource_names:
 
-  service_bus_queue: enrichment-requests
+  event_hub_namespace: "{project}-{environment}-evhns"
+  event_hub_name: purview-diagnostics
+  service_bus_queue_ingest: purview-events
+  service_bus_queue_enrichment: enrichment-requests
   ai_search_index: metadata-context-index
   cosmos_database: metadata_enricher
   cosmos_state_container: state
   cosmos_audit_container: audit
+  blob_container_synergy: synergy
+  blob_container_zipline: zipline
+  blob_container_documentation: documentation
+  blob_container_schemas: schemas
